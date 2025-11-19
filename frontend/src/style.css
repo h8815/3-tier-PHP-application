@@ -1,0 +1,424 @@
+/* =====================================
+   Enhanced Custom Styling with Modern UI
+   ===================================== */
+
+/* 1. Define CSS Variables (Light Mode Default) */
+:root {
+    --body-bg: #f0f2f5;
+    --card-bg: rgba(255, 255, 255, 0.98);
+    --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    --text-color: #212529;
+    --text-muted: #6c757d;
+    --primary-color: #0d6efd;
+    --primary-hover: #0b5ed7;
+    --border-color: #e0e0e0;
+    --transition-speed: 0.3s;
+    --success-color: #28a745;
+    --info-color: #17a2b8;
+    --warning-color: #ffc107;
+    --danger-color: #dc3545;
+}
+
+/* 2. Dark Mode Overrides */
+[data-bs-theme="dark"] {
+    --body-bg: #0d1117;
+    --card-bg: rgba(22, 27, 34, 0.98);
+    --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --text-color: #e6edf3;
+    --text-muted: #8b949e;
+    --primary-color: #58a6ff;
+    --primary-hover: #4493e7;
+    --border-color: #30363d;
+    --success-color: #3fb950;
+    --info-color: #56d4dd;
+    --warning-color: #f0b72f;
+    --danger-color: #f85149;
+}
+
+/* 3. Global Body Styling */
+body {
+    background-image: var(--bg-image);
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    background-position: center center;
+    background-color: var(--body-bg);
+    color: var(--text-color);
+    transition: background-color var(--transition-speed), color var(--transition-speed);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    min-height: 100vh;
+}
+
+/* 4. Enhanced Card Styling */
+.card {
+    background-color: var(--card-bg) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 16px !important;
+    box-shadow: var(--card-shadow) !important;
+    transition: all var(--transition-speed);
+    backdrop-filter: blur(10px);
+    overflow: hidden;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.15) !important;
+}
+
+.card-header {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%) !important;
+    color: white !important;
+    border: none !important;
+    padding: 1.25rem 1.5rem !important;
+    font-weight: 600;
+}
+
+.card-body {
+    padding: 2rem !important;
+}
+
+/* 5. Enhanced Form Elements */
+.form-floating {
+    position: relative;
+    margin-bottom: 1.5rem;
+}
+
+.form-control {
+    background-color: var(--card-bg);
+    border: 2px solid var(--border-color);
+    color: var(--text-color);
+    border-radius: 12px;
+    padding: 1rem 0.75rem;
+    font-size: 1rem;
+    transition: all 0.2s ease;
+    height: calc(3.5rem + 2px);
+}
+
+.form-control:focus {
+    background-color: var(--card-bg);
+    color: var(--text-color);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15);
+    transform: translateY(-1px);
+}
+
+.form-floating>label {
+    padding: 1rem 0.75rem;
+    color: var(--text-muted);
+}
+
+.form-control:focus~label,
+.form-control:not(:placeholder-shown)~label {
+    color: var(--primary-color);
+    font-weight: 500;
+}
+
+/* Dark mode form adjustments */
+[data-bs-theme="dark"] .form-control {
+    background-color: #161b22;
+    border-color: var(--border-color);
+}
+
+[data-bs-theme="dark"] .form-control:focus {
+    background-color: #161b22;
+    border-color: var(--primary-color);
+}
+
+/* 6. Enhanced Button Styles */
+.btn {
+    border-radius: 10px;
+    padding: 0.75rem 1.5rem;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    transition: all 0.2s ease;
+    border: none;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transform: translate(-50%, -50%);
+    transition: width 0.4s, height 0.4s;
+}
+
+.btn:hover::before {
+    width: 300px;
+    height: 300px;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.3);
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(13, 110, 253, 0.4);
+}
+
+.btn-outline-primary,
+.btn-outline-danger,
+.btn-outline-secondary {
+    border: 2px solid currentColor;
+    background: transparent;
+}
+
+.btn-outline-primary:hover {
+    background: var(--primary-color);
+    transform: translateY(-1px);
+}
+
+.btn-outline-danger:hover {
+    background: var(--danger-color);
+    transform: translateY(-1px);
+}
+
+.btn-outline-secondary:hover {
+    background: var(--text-muted);
+    transform: translateY(-1px);
+}
+
+/* 7. Enhanced Table Styles */
+.table-responsive {
+    border-radius: 0 0 16px 16px;
+    overflow: hidden;
+}
+
+.table {
+    margin-bottom: 0;
+    color: var(--text-color);
+}
+
+.table thead th {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+    letter-spacing: 0.5px;
+    padding: 1rem;
+    border: none;
+}
+
+.table tbody td {
+    padding: 1rem;
+    vertical-align: middle;
+    border-color: var(--border-color);
+}
+
+.table-striped tbody tr:nth-of-type(odd) {
+    background-color: rgba(0, 0, 0, 0.02);
+}
+
+[data-bs-theme="dark"] .table-striped tbody tr:nth-of-type(odd) {
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+.table-hover tbody tr {
+    transition: all 0.2s ease;
+}
+
+.table-hover tbody tr:hover {
+    background-color: rgba(13, 110, 253, 0.08);
+    transform: scale(1.01);
+}
+
+.table-primary {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+    color: white;
+}
+
+[data-bs-theme="dark"] .table-primary {
+    background: linear-gradient(135deg, #1f6feb 0%, #1158c7 100%);
+}
+
+/* 8. Theme Toggle Button */
+#theme-toggle {
+    cursor: pointer;
+    font-size: 1.75rem;
+    line-height: 1;
+    border: 2px solid var(--border-color);
+    background: var(--card-bg);
+    color: var(--text-color);
+    padding: 0.5rem 0.75rem;
+    border-radius: 10px;
+    transition: all var(--transition-speed);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+#theme-toggle:hover {
+    transform: rotate(180deg) scale(1.1);
+    border-color: var(--primary-color);
+    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.3);
+}
+
+/* 9. Enhanced Alert Messages */
+.alert {
+    border-radius: 12px;
+    border: none;
+    padding: 1rem 1.5rem;
+    font-weight: 500;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    animation: slideInDown 0.4s ease-out;
+}
+
+@keyframes slideInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.alert-success {
+    background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+    color: #155724;
+}
+
+.alert-info {
+    background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
+    color: #0c5460;
+}
+
+.alert-warning {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    color: #856404;
+}
+
+.alert-danger {
+    background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+    color: #721c24;
+}
+
+/* Dark mode alert adjustments */
+[data-bs-theme="dark"] .alert-success {
+    background: linear-gradient(135deg, #0d4d2e 0%, #0a3d24 100%);
+    color: #7ee3a8;
+}
+
+[data-bs-theme="dark"] .alert-info {
+    background: linear-gradient(135deg, #0c4a6e 0%, #083a56 100%);
+    color: #7dd3fc;
+}
+
+[data-bs-theme="dark"] .alert-warning {
+    background: linear-gradient(135deg, #78350f 0%, #5c2a0c 100%);
+    color: #fcd34d;
+}
+
+[data-bs-theme="dark"] .alert-danger {
+    background: linear-gradient(135deg, #7f1d1d 0%, #651717 100%);
+    color: #fca5a5;
+}
+
+/* 10. Page Title Styling */
+h1.text-primary {
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* 11. Button Group Enhancement */
+.btn-group-sm .btn {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.875rem;
+    border-radius: 8px;
+}
+
+.btn-group .btn:first-child {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.btn-group .btn:last-child {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+/* 12. Form Validation Feedback */
+.invalid-feedback {
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin-top: 0.5rem;
+}
+
+.was-validated .form-control:invalid {
+    border-color: var(--danger-color);
+    background-image: none;
+}
+
+.was-validated .form-control:valid {
+    border-color: var(--success-color);
+    background-image: none;
+}
+
+/* 13. Loading Animation (Optional) */
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* 14. Smooth Scrollbar */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--body-bg);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-color);
+}
+
+/* 15. Mobile Responsiveness */
+@media (max-width: 768px) {
+    .card-body {
+        padding: 1.5rem !important;
+    }
+
+    .btn-group-sm .btn {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+    }
+
+    .table {
+        font-size: 0.875rem;
+    }
+
+    h1 {
+        font-size: 1.75rem;
+    }
+}
+
+/* 16. Empty State Styling */
+.text-muted {
+    color: var(--text-muted) !important;
+    font-style: italic;
+}

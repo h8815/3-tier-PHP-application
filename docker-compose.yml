@@ -1,0 +1,58 @@
+services:
+  frontend:
+    build: ./frontend
+    image: h8815/student-app-frontend:latest
+    container_name: 3tier-frontend
+    environment:
+      API_URL: ${API_URL}
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - 3tier-network
+
+  backend:
+    build: ./backend
+    image: h8815/student-app-backend:latest
+    container_name: 3tier-backend
+    ports:
+      - "8081:80"
+    environment:
+      DB_HOST: database # refer to Database service name
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+    networks:
+      - 3tier-network
+    depends_on:
+      database:
+        condition: service_healthy
+
+  database:
+    image: mysql:8.0
+    container_name: 3tier-database
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    networks:
+      - 3tier-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./init/init.sql:/docker-entrypoint-initdb.d/init.sql # In Dockerfile
+
+volumes:
+  db-data:
+
+networks:
+  3tier-network:
+    driver: bridge
