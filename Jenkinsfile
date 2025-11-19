@@ -21,8 +21,8 @@ pipeline {
                 echo 'Building and starting containers...'
                 // We do NOT cd to a custom path. We use the Jenkins Workspace.
                 sh '''
-                    docker-compose --env-file .env down
-                    docker-compose --env-file .env up -d --build
+                    docker-compose down
+                    docker-compose up -d --build
                 '''
             }
         }
