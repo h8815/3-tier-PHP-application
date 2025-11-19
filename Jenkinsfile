@@ -22,6 +22,7 @@ pipeline {
                 // We do NOT cd to a custom path. We use the Jenkins Workspace.
                 sh '''
                     docker-compose down
+                    sleep 15
                     docker-compose up -d --build
                 '''
             }
