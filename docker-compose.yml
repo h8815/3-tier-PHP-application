@@ -6,7 +6,7 @@ services:
     environment:
       API_URL: ${API_URL}
     ports:
-      - "5000:80"
+      - "80:80"
     depends_on:
       - backend
     networks:
