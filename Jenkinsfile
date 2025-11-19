@@ -3,7 +3,7 @@ pipeline {
     
     environment {
         TEST_URL = "http://13.53.75.60/" 
-        API_URL = "http://13.53.75.60:8081/api/students.php"#mmmmmmmmmmmmm
+        API_URL = "http://13.53.75.60:8081/api/students.php" 
     }
 
     stages {
