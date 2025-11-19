@@ -47,7 +47,7 @@ pipeline {
                 echo 'Validating application...'
                 script {
                     // 1. Check Frontend (HTTP 200)
-                    // we use sh(script: ..., returnStatus: true) to prevent pipeline failure if check fails immediately
+                    // we use sh(script: ..., returnStatus: true) to prevent pipeline failure if check fails immediately 
                     def frontendStatus = sh(script: "curl -s -o /dev/null -w '%{http_code}' ${TEST_URL}", returnStdout: true).trim()
                     
                     if (frontendStatus == '200') {
