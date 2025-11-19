@@ -16,14 +16,23 @@ pipeline {
             }
         }
 
-        stage('Build & Deploy Test') {
+        stage('Build'){
+            steps{
+                echo 'Building the application'
+                script{
+                    sh 'docker build -t h8815/student-app-frontend:latest ./frontend'
+                    sh 'docker build -t h8815/student-app-backend:latest ./backend'
+                }
+            }
+        }
+
+        stage('Deploy Test') {
             steps {
-                echo 'Building and starting containers...'
+                echo 'Restarting containers...'
                 // We do NOT cd to a custom path. We use the Jenkins Workspace.
                 sh '''
                     docker-compose down
-                    sleep 15
-                    docker-compose up -d --build
+                    docker-compose up -d 
                 '''
             }
         }
