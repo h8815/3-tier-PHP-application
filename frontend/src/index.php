@@ -161,7 +161,7 @@ if (isset($_GET['status'])) {
     </div>
 
     <div class="hero-section">
-        <h1 class="hero-title">Welcome to Student Management System</h1>
+        <h1 class="hero-title">Hello, Welcome to Student Management System</h1>
         <p class="hero-subtitle">Efficiently manage and organize student records</p>
         <div class="stats-badge" id="student-count-badge">
             📊 Loading...

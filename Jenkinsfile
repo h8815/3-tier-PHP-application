@@ -32,7 +32,7 @@ pipeline {
             steps {
                 echo 'Waiting 30 seconds for MySQL to initialize...'
                 // Essential: Give the DB time to start before testing
-                sh 'sleep 30'
+                sh 'sleep 15'
             }
         }
 
