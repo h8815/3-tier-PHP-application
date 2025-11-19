@@ -1,11 +1,9 @@
 pipeline {
     agent any
     
-    // Environment should be at the top level, not inside agent
     environment {
-        // Use 'localhost' for validation since Jenkins is running on the same server
         TEST_URL = "http://13.53.75.60/" 
-        API_URL = "http://13.53.75.60:8081/api/students.php"
+        API_URL = "http://13.53.75.60:8081/api/students.php"#mmmmmmmmmmmmm
     }
 
     stages {
@@ -29,7 +27,6 @@ pipeline {
         stage('Deploy Test') {
             steps {
                 echo 'Restarting containers...'
-                // We do NOT cd to a custom path. We use the Jenkins Workspace.
                 sh '''
                     docker-compose down
                     docker-compose up -d 
@@ -60,7 +57,6 @@ pipeline {
                     }
 
                     // 2. Check API (Look for "success" in body)
-                    // We do NOT use -I here, because we need to read the body text
                     try {
                         sh "curl -s ${API_URL} | grep 'success'"
                         echo "✅ API is returning success data"
