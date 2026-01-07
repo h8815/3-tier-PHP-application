@@ -2,8 +2,8 @@ pipeline {
     agent any
     
     environment {
-        TEST_URL = "http://13.53.75.60/" 
-        API_URL = "http://13.53.75.60:8081/api/students.php" 
+        TEST_URL = "http://localhost" 
+        API_URL = "http://localhost:8081/api/students.php" 
     }
 
     stages {
@@ -38,7 +38,7 @@ pipeline {
             steps {
                 echo 'Waiting 30 seconds for MySQL to initialize...'
                 // Essential: Give the DB time to start before testing
-                sh 'sleep 15'
+                sh 'sleep 30'
             }
         }
 
