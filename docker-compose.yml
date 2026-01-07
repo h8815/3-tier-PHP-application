@@ -20,9 +20,9 @@ services:
       - "8081:80"
     environment:
       DB_HOST: database # refer to Database service name
-      DB_USER: DBuser
-      DB_PASSWORD: root
-      DB_NAME: student_db
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
     networks:
       - 3tier-network
     depends_on:
@@ -32,13 +32,11 @@ services:
   database:
     image: mysql:8.0
     container_name: 3tier-database
-    ports:
-      - "3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: student_db
-      MYSQL_USER: DBuser
-      MYSQL_PASSWORD: root
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
     networks:
       - 3tier-network
     healthcheck:
