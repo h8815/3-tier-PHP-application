@@ -24,6 +24,18 @@ pipeline {
             }
         }
 
+        stage('Load .env') {
+            steps {
+                script {
+                    withCredentials([file(credentialsId: '3TIER-PHP', variable: 'ENVFILE')]) {
+                        sh "cp ${ENVFILE} .env"
+                    }
+                    echo ".env loaded"
+                }
+            }
+        }
+
+
         stage('Deploy Test') {
             steps {
                 echo 'Restarting containers...'
