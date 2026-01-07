@@ -28,12 +28,15 @@ pipeline {
             steps {
                 script {
                     withCredentials([file(credentialsId: '3TIER-PHP', variable: 'ENVFILE')]) {
-                        sh "cp ${ENVFILE} .env"
+                        // Use single quotes for the sh command to prevent Groovy interpolation.
+                        // Wrap "$ENVFILE" in double quotes for the shell to handle potential spaces.
+                        sh 'cp "$ENVFILE" .env'
                     }
                     echo ".env loaded"
                 }
             }
         }
+
 
 
         stage('Deploy Test') {
