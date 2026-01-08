@@ -7,7 +7,7 @@ pipeline {
     }
 
     stages {
-        
+
         stage('Cleanup Workspace') {
             steps {
                 cleanWs()
@@ -64,7 +64,7 @@ pipeline {
             steps {
                 echo 'Restarting containers...'
                 sh '''
-                    // docker-compose pull
+                    #docker-compose pull
                     docker-compose down
                     docker-compose up -d --force-recreate
                 '''
