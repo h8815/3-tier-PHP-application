@@ -65,8 +65,8 @@ pipeline {
                 echo 'Restarting containers...'
                 sh '''
                     #docker-compose pull
-                    docker-compose down
-                    docker-compose up -d --force-recreate
+                    docker-compose down || true
+                    docker-compose up -d --force-recreate || true
                 '''
             }
         }
