@@ -1,7 +1,7 @@
 services:
   frontend:
-    # build: ./frontend
-    image: h8815/student-app-frontend:latest
+    build: ./frontend
+    # image: h8815/student-app-frontend:latest
     container_name: 3tier-frontend
     environment:
       API_URL: ${API_URL}
@@ -13,8 +13,8 @@ services:
       - 3tier-network
 
   backend:
-    # build: ./backend
-    image: h8815/student-app-backend:latest
+    build: ./backend
+    # image: h8815/student-app-backend:latest
     container_name: 3tier-backend
     ports:
       - "8081:80"

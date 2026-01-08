@@ -2,7 +2,7 @@ pipeline {
     agent any
     
     environment {
-        TEST_URL = "http://localhost" 
+        TEST_URL = "http://localhost:3000" 
         API_URL = "http://localhost:8081/api/students.php" 
     }
 
