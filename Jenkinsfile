@@ -40,16 +40,16 @@ pipeline {
         stage('Push image to DockerHub') {
             steps {
             echo 'Pushing Docker images to DockerHub...'
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh '''
-                        # Log in
-                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                // withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                //     sh '''
+                //         # Log in
+                //         echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
                         
-                        # Push images (Make sure your docker-compose.yml actually tags them like this!)
-                        docker push ${DOCKER_USER}/student-app-frontend:latest
-                        docker push ${DOCKER_USER}/student-app-backend:latest
-                    '''
-                }
+                //         # Push images (Make sure your docker-compose.yml actually tags them like this!)
+                //         docker push ${DOCKER_USER}/student-app-frontend:latest
+                //         docker push ${DOCKER_USER}/student-app-backend:latest
+                //     '''
+                // }
             }
         }
 
@@ -57,7 +57,7 @@ pipeline {
             steps {
                 echo 'Restarting containers...'
                 sh '''
-                    docker-compose pull
+                    // docker-compose pull
                     docker-compose down
                     docker-compose up -d --force-recreate
                 '''
