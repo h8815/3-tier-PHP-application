@@ -37,14 +37,29 @@ pipeline {
             }
         }
 
-
+        stage('Push image to DockerHub') {
+            echo 'Pushing Docker images to DockerHub...'
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh '''
+                        # Log in
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        
+                        # Push images (Make sure your docker-compose.yml actually tags them like this!)
+                        docker push ${DOCKER_USER}/student-app-frontend:latest
+                        docker push ${DOCKER_USER}/student-app-backend:latest
+                    '''
+                }
+            }
+        }
 
         stage('Deploy Test') {
             steps {
                 echo 'Restarting containers...'
                 sh '''
+                    docker-compose pull
                     docker-compose down
-                    docker-compose up -d 
+                    docker-compose up -d --force-recreate
                 '''
             }
         }
@@ -82,25 +97,17 @@ pipeline {
             }
         }
 
-        stage('Push image to DockerHub') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh '''
-                        # Log in
-                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                        
-                        # Push images (Make sure your docker-compose.yml actually tags them like this!)
-                        docker push ${DOCKER_USER}/student-app-frontend:latest
-                        docker push ${DOCKER_USER}/student-app-backend:latest
-                    '''
-                }
-            }
-        }
     }
     
     post {
         always {
-            echo 'Pipeline finished.'
+             echo "Cleaning Docker leftovers on node1..."
+                sh """
+                    // docker rmi -f "${IMAGE_NAME}:${IMAGE_TAG}" || true
+                    docker image prune -f || true
+                    docker container prune -f || true
+                    docker builder prune -f || true
+                """
         }
         failure {
             echo '⚠️ Pipeline failed!'
