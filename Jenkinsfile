@@ -38,8 +38,8 @@ pipeline {
         }
 
         stage('Push image to DockerHub') {
-            echo 'Pushing Docker images to DockerHub...'
             steps {
+            echo 'Pushing Docker images to DockerHub...'
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
                         # Log in
@@ -99,15 +99,14 @@ pipeline {
 
     }
     
-    post {
+   post {
         always {
-             echo "Cleaning Docker leftovers on node1..."
-                sh """
-                    // docker rmi -f "${IMAGE_NAME}:${IMAGE_TAG}" || true
-                    docker image prune -f || true
-                    docker container prune -f || true
-                    docker builder prune -f || true
-                """
+            echo "Cleaning Docker leftovers on node1..."
+            sh """
+                docker image prune -f || true
+                docker container prune -f || true
+                docker builder prune -f || true
+            """
         }
         failure {
             echo '⚠️ Pipeline failed!'
