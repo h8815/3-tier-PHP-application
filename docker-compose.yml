@@ -1,52 +1,68 @@
+version: '3.8'
+
 services:
-  frontend:
-    build: ./frontend
-    # image: h8815/student-app-frontend:latest
-    container_name: 3tier-frontend
-    environment:
-      API_URL: ${API_URL}
+  # Nginx Gateway (The only one exposed to the public)
+  nginx:
+    image: nginx:latest
+    container_name: 3tier-nginx
+    restart: always
     ports:
-      - "3000:80"
+      - "3000:80"  # Maps Azure Port 3000 -> Nginx 80
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
     depends_on:
+      - frontend
       - backend
     networks:
       - 3tier-network
 
+  # Frontend (Internal Only - No Ports)
+  frontend:
+    build: ./frontend
+    container_name: 3tier-frontend
+    restart: always
+    environment:
+      # Browser asks Nginx (Port 3000) for the API
+      API_URL: ${API_URL}
+    networks:
+      - 3tier-network
+
+  # Backend (Internal Only - No Ports)
   backend:
     build: ./backend
-    # image: h8815/student-app-backend:latest
     container_name: 3tier-backend
-    ports:
-      - "8081:80"
+    restart: always
     environment:
-      DB_HOST: database # refer to Database service name
+      DB_HOST: database
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME}
-    networks:
-      - 3tier-network
     depends_on:
       database:
         condition: service_healthy
+    networks:
+      - 3tier-network
 
+  # Database
   database:
     image: mysql:8.0
     container_name: 3tier-database
+    restart: always
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME}
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASSWORD}
-    networks:
-      - 3tier-network
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./init/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
       timeout: 5s
       retries: 5
-    volumes:
-      - db-data:/var/lib/mysql
-      - ./init/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - 3tier-network
 
 volumes:
   db-data:

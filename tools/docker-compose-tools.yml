@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # Tool 1: SonarQube
+  sonarqube:
+    image: sonarqube:lts-community
+    container_name: tools-sonar
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+    volumes:
+      - sonar_data:/opt/sonarqube/data
+    networks:
+      - tools-net
+
+  # Tool 2: Jenkins Agent
+  jenkins-agent:
+    image: jenkins/inbound-agent:latest
+    container_name: tools-agent
+    restart: unless-stopped
+    user: root
+    environment:
+      - JENKINS_URL=http://4.240.107.20:8080
+      - JENKINS_AGENT_NAME=wsl-agent
+      - JENKINS_SECRET=d1e46beb76f8c72fbc9fb00df191f6fe9eacffb93d8f4bb7878c6bdcd5e01283
+      # CRITICAL FIX: Enable WebSocket to connect via Port 8080
+      - JENKINS_WEB_SOCKET=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agent_work:/home/jenkins/agent
+    networks:
+      - tools-net
+
+networks:
+  tools-net:
+    driver: bridge
+
+volumes:
+  sonar_data:
+  agent_work:
