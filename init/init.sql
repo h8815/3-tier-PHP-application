@@ -11,8 +11,9 @@ CREATE TABLE IF NOT EXISTS users (
 -- Enhanced Student table with new fields
 CREATE TABLE IF NOT EXISTS student (
     ID INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    admin_id INT(11) NOT NULL,
     Name VARCHAR(255) NOT NULL,
-    Email VARCHAR(255) NOT NULL UNIQUE,
+    Email VARCHAR(255) NOT NULL,
     Age INT(3) NOT NULL,
     profile_photo VARCHAR(255),
     phone VARCHAR(20),
@@ -20,18 +21,15 @@ CREATE TABLE IF NOT EXISTS student (
     enrollment_date DATETIME DEFAULT CURRENT_TIMESTAMP,
     status ENUM('active', 'inactive', 'graduated') DEFAULT 'active',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- Performance indexes for Name and Email
 CREATE INDEX idx_student_name ON student(Name);
 CREATE INDEX idx_student_email ON student(Email);
 CREATE INDEX idx_student_status ON student(status);
+CREATE INDEX idx_student_admin ON student(admin_id);
 
--- Sample students with Neo-Brutalist Pop vibes
-INSERT INTO student (Name, Email, Age, phone, address, status) VALUES 
-('Zara Khan', 'zara.khan@amu.ac.in', 21, '+91-9876543210', 'Flat 12, Zakir Nagar, New Delhi', 'active'),
-('Aman Gupta', 'aman.gupta@vit.ac.in', 22, '+91-9876543211', 'Room 203, Boys Hostel, Vellore', 'active'),
-('Sneha Joshi', 'sneha.joshi@mitwpu.edu.in', 20, '+91-9876543212', 'Karve Nagar, Pune, Maharashtra', 'graduated'),
-('Karthik Reddy', 'karthik.reddy@cbit.ac.in', 19, '+91-9876543213', 'Madhapur, Hyderabad, Telangana', 'active'),
-('Nisha Patel', 'nisha.patel@gtu.ac.in', 23, '+91-9876543214', 'Satellite Road, Ahmedabad, Gujarat', 'inactive');
+-- Sample students will be created by individual admins
+-- No default students inserted

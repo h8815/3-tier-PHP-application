@@ -289,6 +289,9 @@ require_once 'auth_check.php';
                     <a href="add-student.php" class="btn btn-primary shadow-sm btn-sm">
                         <i class="bi bi-plus-circle"></i> <span class="d-none d-md-inline">Add Student</span>
                     </a>
+                    <a href="import-export.php" class="btn btn-outline-success shadow-sm btn-sm">
+                        <i class="bi bi-file-earmark-arrow-up"></i> <span class="d-none d-md-inline">Import/Export</span>
+                    </a>
                     <button id="logout-btn" class="btn btn-outline-danger btn-sm">
                         <i class="bi bi-box-arrow-right"></i> <span class="d-none d-md-inline">Logout</span>
                     </button>

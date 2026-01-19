@@ -53,17 +53,18 @@ try {
         exit;
     }
     
-    // Get current photo path
-    $sql = "SELECT profile_photo FROM " . DB_TABLE_STUDENT . " WHERE ID = ?";
+    // Get current photo path and verify admin ownership
+    $sql = "SELECT profile_photo FROM " . DB_TABLE_STUDENT . " WHERE ID = ? AND admin_id = ?";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param("i", $student_id);
+    $adminId = $_SESSION['user_id'] ?? null;
+    $stmt->bind_param("ii", $student_id, $adminId);
     $stmt->execute();
     $result = $stmt->get_result();
     $student = $result->fetch_assoc();
     
     if (!$student) {
         http_response_code(404);
-        echo json_encode(['status' => 'error', 'message' => 'Student not found']);
+        echo json_encode(['status' => 'error', 'message' => 'Student not found or access denied']);
         exit;
     }
     

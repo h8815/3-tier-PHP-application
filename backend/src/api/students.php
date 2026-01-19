@@ -21,7 +21,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $method = $_SERVER['REQUEST_METHOD'];
 
 function isAuthenticated() {
-    return isset($_SESSION['authenticated']) && $_SESSION['authenticated'] === true;
+    return isset($_SESSION['authenticated']) && $_SESSION['authenticated'] === true && isset($_SESSION['user_id']);
+}
+
+function getCurrentAdminId() {
+    return $_SESSION['user_id'] ?? null;
 }
 
 function handleImageUpload($file) {
@@ -54,9 +58,10 @@ if ($method === 'GET') {
     $id = $_GET['id'] ?? null;
     
     if ($id) {
-        $sql = "SELECT * FROM " . DB_TABLE_STUDENT . " WHERE ID = ?";
+        $sql = "SELECT * FROM " . DB_TABLE_STUDENT . " WHERE ID = ? AND admin_id = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("i", $id);
+        $adminId = getCurrentAdminId();
+        $stmt->bind_param("ii", $id, $adminId);
         $stmt->execute();
         $result = $stmt->get_result();
         $student = $result->fetch_assoc();
@@ -79,9 +84,9 @@ if ($method === 'GET') {
         $search = $_GET['search'] ?? '';
         $statusFilter = $_GET['status'] ?? '';
         
-        $whereConditions = [];
-        $params = [];
-        $types = '';
+        $whereConditions = ['admin_id = ?'];
+        $params = [getCurrentAdminId()];
+        $types = 'i';
         
         if (!empty($search)) {
             $whereConditions[] = "(Name LIKE ? OR Email LIKE ?)";
@@ -126,8 +131,12 @@ if ($method === 'GET') {
         $students = $result->fetch_all(MYSQLI_ASSOC);
         
         // Status counts
-        $statusSql = "SELECT status, COUNT(*) as count FROM " . DB_TABLE_STUDENT . " GROUP BY status";
-        $statusResult = $conn->query($statusSql);
+        $statusSql = "SELECT status, COUNT(*) as count FROM " . DB_TABLE_STUDENT . " WHERE admin_id = ? GROUP BY status";
+        $statusStmt = $conn->prepare($statusSql);
+        $adminId = getCurrentAdminId();
+        $statusStmt->bind_param('i', $adminId);
+        $statusStmt->execute();
+        $statusResult = $statusStmt->get_result();
         $statusCounts = [];
         while ($row = $statusResult->fetch_assoc()) {
             $statusCounts[$row['status']] = (int)$row['count'];
@@ -173,9 +182,10 @@ elseif ($method === 'POST') {
         $profilePhoto = handleImageUpload($_FILES['profile_photo']);
     }
     
-    $sql = "INSERT INTO " . DB_TABLE_STUDENT . " (Name, Email, Age, phone, address, status, profile_photo) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    $sql = "INSERT INTO " . DB_TABLE_STUDENT . " (admin_id, Name, Email, Age, phone, address, status, profile_photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param("ssissss", $name, $email, $age, $phone, $address, $status, $profilePhoto);
+    $adminId = getCurrentAdminId();
+    $stmt->bind_param("ississss", $adminId, $name, $email, $age, $phone, $address, $status, $profilePhoto);
     
     if ($stmt->execute()) {
         http_response_code(201);
@@ -203,9 +213,10 @@ elseif ($method === 'PUT') {
         exit;
     }
     
-    $sql = "UPDATE " . DB_TABLE_STUDENT . " SET Name = ?, Email = ?, Age = ?, phone = ?, address = ?, status = ? WHERE ID = ?";
+    $sql = "UPDATE " . DB_TABLE_STUDENT . " SET Name = ?, Email = ?, Age = ?, phone = ?, address = ?, status = ? WHERE ID = ? AND admin_id = ?";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param("ssisssi", $input['name'], $input['email'], $input['age'], $input['phone'], $input['address'], $input['status'], $id);
+    $adminId = getCurrentAdminId();
+    $stmt->bind_param("sissssii", $input['name'], $input['email'], $input['age'], $input['phone'], $input['address'], $input['status'], $id, $adminId);
     
     if ($stmt->execute()) {
         echo json_encode(['status' => 'updated', 'id' => $id, 'message' => 'Student updated successfully']);
@@ -232,9 +243,10 @@ elseif ($method === 'DELETE') {
         exit;
     }
     
-    $sql = "DELETE FROM " . DB_TABLE_STUDENT . " WHERE ID = ?";
+    $sql = "DELETE FROM " . DB_TABLE_STUDENT . " WHERE ID = ? AND admin_id = ?";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param("i", $id);
+    $adminId = getCurrentAdminId();
+    $stmt->bind_param("ii", $id, $adminId);
     
     if ($stmt->execute()) {
         echo json_encode(['status' => 'deleted', 'id' => $id, 'message' => 'Student deleted successfully']);

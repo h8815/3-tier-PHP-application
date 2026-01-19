@@ -52,6 +52,20 @@ try {
         exit;
     }
     
+    // Check if student belongs to current admin
+    $checkSql = "SELECT ID FROM " . DB_TABLE_STUDENT . " WHERE ID = ? AND admin_id = ?";
+    $checkStmt = $conn->prepare($checkSql);
+    $adminId = $_SESSION['user_id'] ?? null;
+    $checkStmt->bind_param("ii", $student_id, $adminId);
+    $checkStmt->execute();
+    $checkResult = $checkStmt->get_result();
+    
+    if ($checkResult->num_rows === 0) {
+        http_response_code(404);
+        echo json_encode(['status' => 'error', 'message' => 'Student not found or access denied']);
+        exit;
+    }
+    
     $file = $_FILES['profile_photo'];
     
     // Validate file
