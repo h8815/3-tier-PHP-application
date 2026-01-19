@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   # Nginx Gateway (The only one exposed to the public)
@@ -7,7 +7,7 @@ services:
     container_name: 3tier-nginx
     restart: always
     ports:
-      - "3000:80"  # Maps Azure Port 3000 -> Nginx 80
+      - "3000:80" # Maps Port 3000 -> Nginx 80
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
     depends_on:
@@ -22,8 +22,8 @@ services:
     container_name: 3tier-frontend
     restart: always
     environment:
-      # Browser asks Nginx (Port 3000) for the API
-      API_URL: ${API_URL}
+      # Pass the public-facing API URL
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:3000}
     networks:
       - 3tier-network
 
@@ -37,6 +37,11 @@ services:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:3000}
+      SESSION_SAVE_PATH: /tmp/sessions
+    volumes:
+      - backend-sessions:/tmp/sessions
+      - backend-uploads:/var/www/html/uploads
     depends_on:
       database:
         condition: service_healthy
@@ -66,6 +71,8 @@ services:
 
 volumes:
   db-data:
+  backend-sessions:
+  backend-uploads:
 
 networks:
   3tier-network:

@@ -1,0 +1,5383 @@
+
+=== FILE: d:\Projects\3-tier-PHP-application\.dockerignore ===
+.env
+.DS_Store
+*.log
+.env.example
+.gitignore
+
+=== FILE: d:\Projects\3-tier-PHP-application\.env ===
+DB_USER=DBuser
+DB_PASSWORD=root
+DB_NAME=student_db
+DB_ROOT_PASSWORD=root
+DB_HOST=database
+
+# API Configuration
+# For LOCAL development use: http://localhost:3000
+# For PRODUCTION use your server IP: http://4.240.107.20:3000
+# API_BASE_URL=http://4.240.107.20:3000 
+API_BASE_URL=http://localhost:3000
+
+# CORS Configuration - Comma separated allowed origins
+# For LOCAL: http://localhost:3000
+# For PRODUCTION: http://your-domain.com,https://your-domain.com
+ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+=== FILE: d:\Projects\3-tier-PHP-application\.env.example ===
+DB_HOST=your_database_host
+DB_USER=your_database_user
+DB_PASSWORD=your_database_password
+DB_NAME=your_database_name
+# API_URL must be accessible from the USER'S BROWSER.
+API_URL=http://localhost:8081/api/students.php  # optional override
+    # For local dev: http://localhost:8081/api/students.php
+    # For production: http://your-domain.com:8081/api/students.php
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.gitignore ===
+.env
+.DS_Store
+*.log
+vendor/
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\docker-compose.yml ===
+version: "3.8"
+
+services:
+  # Nginx Gateway (The only one exposed to the public)
+  nginx:
+    image: nginx:latest
+    container_name: 3tier-nginx
+    restart: always
+    ports:
+      - "3000:80" # Maps Port 3000 -> Nginx 80
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - 3tier-network
+
+  # Frontend (Internal Only - No Ports)
+  frontend:
+    build: ./frontend
+    container_name: 3tier-frontend
+    restart: always
+    environment:
+      # Pass the public-facing API URL
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:3000}
+    networks:
+      - 3tier-network
+
+  # Backend (Internal Only - No Ports)
+  backend:
+    build: ./backend
+    container_name: 3tier-backend
+    restart: always
+    environment:
+      DB_HOST: database
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:3000}
+      SESSION_SAVE_PATH: /tmp/sessions
+    volumes:
+      - backend-sessions:/tmp/sessions
+      - backend-uploads:/var/www/html/uploads
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - 3tier-network
+
+  # Database
+  database:
+    image: mysql:8.0
+    container_name: 3tier-database
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./init/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - 3tier-network
+
+volumes:
+  db-data:
+  backend-sessions:
+  backend-uploads:
+
+networks:
+  3tier-network:
+    driver: bridge
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\Jenkinsfile ===
+pipeline {
+    agent { label 'wsl-agent' } 
+
+    environment {
+        // Azure Server Config
+        PROD_IP = "4.240.107.20"
+        
+        // UPDATED: Using your specific user
+        PROD_USER = "c9lab" 
+        PROD_DIR = "/home/c9lab/student-app"
+
+        // URLs for validation
+        TEST_URL = "http://4.240.107.20:3000" 
+        API_URL  = "http://4.240.107.20:3000/api/students.php" 
+    }
+
+    stages {
+        stage('Cleanup') {
+            steps { cleanWs() }
+        }
+
+        stage('Checkout') {
+            steps { checkout scm }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    def scannerHome = tool 'SonarScanner'
+                    withSonarQubeEnv('SonarServer') {
+                        sh """${scannerHome}/bin/sonar-scanner \
+                        -Dsonar.projectKey=student-management-php \
+                        -Dsonar.projectName='Student Management PHP' \
+                        -Dsonar.sources=frontend/src,backend/src \
+                        -Dsonar.php.exclusions=**/vendor/** \
+                        -Dsonar.sourceEncoding=UTF-8"""
+                    }
+                }
+            }
+        }
+
+        stage('Build & Push') {
+            steps {
+                script {
+                    sh 'docker build -t h8815/student-app-frontend:latest ./frontend'
+                    sh 'docker build -t h8815/student-app-backend:latest ./backend'
+
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh '''
+                            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                            docker push h8815/student-app-frontend:latest
+                            docker push h8815/student-app-backend:latest
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Azure') {
+            steps {
+                // UPDATED: Using the specific ID you created
+                sshagent(['php-application-ssh-key']) {
+                    script {
+                        // 1. Prepare .env file
+                        withCredentials([file(credentialsId: '3TIER-PHP', variable: 'ENVFILE')]) {
+                            sh 'cp "$ENVFILE" .env'
+                        }
+
+                        // 2. Create Directory on Azure (using c9lab user)
+                        sh "ssh -o StrictHostKeyChecking=no ${PROD_USER}@${PROD_IP} 'mkdir -p ${PROD_DIR}/nginx'"
+
+                        // 3. Copy Config Files to Azure
+                        sh "scp -o StrictHostKeyChecking=no docker-compose.yml .env ${PROD_USER}@${PROD_IP}:${PROD_DIR}/"
+                        sh "scp -o StrictHostKeyChecking=no nginx/default.conf ${PROD_USER}@${PROD_IP}:${PROD_DIR}/nginx/"
+
+                        // 4. Restart Containers on Azure
+                        sh """
+                            ssh -o StrictHostKeyChecking=no ${PROD_USER}@${PROD_IP} '
+                                cd ${PROD_DIR}
+                                docker-compose pull
+                                docker-compose down || true
+                                docker-compose up -d --force-recreate
+                            '
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Validation') {
+            steps {
+                echo 'Validating Deployment...'
+                sh "curl -s ${API_URL} | grep 'success' || echo 'Waiting for DB...'"
+            }
+        }
+    }
+}
+
+=== FILE: d:\Projects\3-tier-PHP-application\README.md ===
+# 🎓 Student Management System (3-Tier Architecture)
+
+A modern, containerized PHP application re-architected into a true 3-tier microservices solution. This project demonstrates DevOps best practices including Docker containerization, frontend/backend separation, and a complete CI/CD pipeline using Jenkins and AWS.
+
+![PHP](https://img.shields.io/badge/PHP-8.2-blue)
+![MySQL](https://img.shields.io/badge/MySQL-8.0-orange)
+![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
+![Architecture](https://img.shields.io/badge/Architecture-3--Tier-green)
+![CICD](https://img.shields.io/badge/CI%2FCD-Jenkins-red)
+
+## 🏗️ Architecture
+
+This application is decoupled into three isolated layers (Containers):
+
+1.  **Presentation Tier (Frontend)**:
+    * Running on: `Apache/PHP 8.2` (Port `80`)
+    * Pure HTML/JS/CSS interface.
+    * Communicates with the Backend via REST API.
+2.  **Logic Tier (Backend API)**:
+    * Running on: `Apache/PHP 8.2` (Port `8081`)
+    * Handles all business logic and data validation.
+    * Exposes JSON endpoints (`GET`, `POST`, `PUT`, `DELETE`).
+3.  **Data Tier (Database)**:
+    * Running on: `MySQL 8.0` (Port `3306`)
+    * Persistent storage using Docker Volumes.
+
+## 🚀 Features
+
+- ✅ **Full CRUD**: Create, Read, Update, and Delete student records.
+- 🎨 **Modern UI**: Responsive design using Bootstrap 5 with Dark/Light mode.
+- 🔌 **REST API**: Separate backend that can be consumed by any frontend.
+- 🐳 **Dockerized**: Fully automated setup with `docker-compose`.
+- 🔄 **CI/CD Ready**: Configured for automated deployment via Jenkins.
+- 📊 **Live Statistics**: Real-time student count and API status monitoring.
+
+## 📂 Project Structure
+
+```text
+student-management-system/
+├── docker-compose.yml      # Orchestrates Frontend, Backend, and DB services
+├── Jenkinsfile             # CI/CD Pipeline script
+├── .env                    # Environment variables (API URL, DB Creds)
+├── frontend/
+│   ├── Dockerfile          # Frontend container config
+│   └── src/                # UI source code (index.php, view.php, etc.)
+├── backend/
+│   ├── Dockerfile          # Backend container config
+│   └── src/                # API source code (api/students.php, db.php)
+└── init/
+    └── init.sql            # Database initialization script
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\config ===
+[core]
+	repositoryformatversion = 0
+	filemode = false
+	bare = false
+	logallrefupdates = true
+	symlinks = false
+	ignorecase = true
+[remote "origin"]
+	url = https://github.com/h8815/3-tier-PHP-application.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "main"]
+	remote = origin
+	merge = refs/heads/main
+	vscode-merge-base = origin/main
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\description ===
+Unnamed repository; edit this file 'description' to name the repository.
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\HEAD ===
+ref: refs/heads/main
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\index ===
+[SKIPPED] Binary file or unsupported encoding.
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\packed-refs ===
+# pack-refs with: peeled fully-peeled sorted 
+a3cebc31f695aaebf1ebd518e8fc256285c08b88 refs/remotes/origin/main
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\applypatch-msg.sample ===
+#!/bin/sh
+#
+# An example hook script to check the commit log message taken by
+# applypatch from an e-mail message.
+#
+# The hook should exit with non-zero status after issuing an
+# appropriate message if it wants to stop the commit.  The hook is
+# allowed to edit the commit message file.
+#
+# To enable this hook, rename this file to "applypatch-msg".
+
+. git-sh-setup
+commitmsg="$(git rev-parse --git-path hooks/commit-msg)"
+test -x "$commitmsg" && exec "$commitmsg" ${1+"$@"}
+:
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\commit-msg.sample ===
+#!/bin/sh
+#
+# An example hook script to check the commit log message.
+# Called by "git commit" with one argument, the name of the file
+# that has the commit message.  The hook should exit with non-zero
+# status after issuing an appropriate message if it wants to stop the
+# commit.  The hook is allowed to edit the commit message file.
+#
+# To enable this hook, rename this file to "commit-msg".
+
+# Uncomment the below to add a Signed-off-by line to the message.
+# Doing this in a hook is a bad idea in general, but the prepare-commit-msg
+# hook is more suited to it.
+#
+# SOB=$(git var GIT_AUTHOR_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
+# grep -qs "^$SOB" "$1" || echo "$SOB" >> "$1"
+
+# This example catches duplicate Signed-off-by lines.
+
+test "" = "$(grep '^Signed-off-by: ' "$1" |
+	 sort | uniq -c | sed -e '/^[ 	]*1[ 	]/d')" || {
+	echo >&2 Duplicate Signed-off-by lines.
+	exit 1
+}
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\fsmonitor-watchman.sample ===
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use IPC::Open2;
+
+# An example hook script to integrate Watchman
+# (https://facebook.github.io/watchman/) with git to speed up detecting
+# new and modified files.
+#
+# The hook is passed a version (currently 2) and last update token
+# formatted as a string and outputs to stdout a new update token and
+# all files that have been modified since the update token. Paths must
+# be relative to the root of the working tree and separated by a single NUL.
+#
+# To enable this hook, rename this file to "query-watchman" and set
+# 'git config core.fsmonitor .git/hooks/query-watchman'
+#
+my ($version, $last_update_token) = @ARGV;
+
+# Uncomment for debugging
+# print STDERR "$0 $version $last_update_token\n";
+
+# Check the hook interface version
+if ($version ne 2) {
+	die "Unsupported query-fsmonitor hook version '$version'.\n" .
+	    "Falling back to scanning...\n";
+}
+
+my $git_work_tree = get_working_dir();
+
+my $retry = 1;
+
+my $json_pkg;
+eval {
+	require JSON::XS;
+	$json_pkg = "JSON::XS";
+	1;
+} or do {
+	require JSON::PP;
+	$json_pkg = "JSON::PP";
+};
+
+launch_watchman();
+
+sub launch_watchman {
+	my $o = watchman_query();
+	if (is_work_tree_watched($o)) {
+		output_result($o->{clock}, @{$o->{files}});
+	}
+}
+
+sub output_result {
+	my ($clockid, @files) = @_;
+
+	# Uncomment for debugging watchman output
+	# open (my $fh, ">", ".git/watchman-output.out");
+	# binmode $fh, ":utf8";
+	# print $fh "$clockid\n@files\n";
+	# close $fh;
+
+	binmode STDOUT, ":utf8";
+	print $clockid;
+	print "\0";
+	local $, = "\0";
+	print @files;
+}
+
+sub watchman_clock {
+	my $response = qx/watchman clock "$git_work_tree"/;
+	die "Failed to get clock id on '$git_work_tree'.\n" .
+		"Falling back to scanning...\n" if $? != 0;
+
+	return $json_pkg->new->utf8->decode($response);
+}
+
+sub watchman_query {
+	my $pid = open2(\*CHLD_OUT, \*CHLD_IN, 'watchman -j --no-pretty')
+	or die "open2() failed: $!\n" .
+	"Falling back to scanning...\n";
+
+	# In the query expression below we're asking for names of files that
+	# changed since $last_update_token but not from the .git folder.
+	#
+	# To accomplish this, we're using the "since" generator to use the
+	# recency index to select candidate nodes and "fields" to limit the
+	# output to file names only. Then we're using the "expression" term to
+	# further constrain the results.
+	my $last_update_line = "";
+	if (substr($last_update_token, 0, 1) eq "c") {
+		$last_update_token = "\"$last_update_token\"";
+		$last_update_line = qq[\n"since": $last_update_token,];
+	}
+	my $query = <<"	END";
+		["query", "$git_work_tree", {$last_update_line
+			"fields": ["name"],
+			"expression": ["not", ["dirname", ".git"]]
+		}]
+	END
+
+	# Uncomment for debugging the watchman query
+	# open (my $fh, ">", ".git/watchman-query.json");
+	# print $fh $query;
+	# close $fh;
+
+	print CHLD_IN $query;
+	close CHLD_IN;
+	my $response = do {local $/; <CHLD_OUT>};
+
+	# Uncomment for debugging the watch response
+	# open ($fh, ">", ".git/watchman-response.json");
+	# print $fh $response;
+	# close $fh;
+
+	die "Watchman: command returned no output.\n" .
+	"Falling back to scanning...\n" if $response eq "";
+	die "Watchman: command returned invalid output: $response\n" .
+	"Falling back to scanning...\n" unless $response =~ /^\{/;
+
+	return $json_pkg->new->utf8->decode($response);
+}
+
+sub is_work_tree_watched {
+	my ($output) = @_;
+	my $error = $output->{error};
+	if ($retry > 0 and $error and $error =~ m/unable to resolve root .* directory (.*) is not watched/) {
+		$retry--;
+		my $response = qx/watchman watch "$git_work_tree"/;
+		die "Failed to make watchman watch '$git_work_tree'.\n" .
+		    "Falling back to scanning...\n" if $? != 0;
+		$output = $json_pkg->new->utf8->decode($response);
+		$error = $output->{error};
+		die "Watchman: $error.\n" .
+		"Falling back to scanning...\n" if $error;
+
+		# Uncomment for debugging watchman output
+		# open (my $fh, ">", ".git/watchman-output.out");
+		# close $fh;
+
+		# Watchman will always return all files on the first query so
+		# return the fast "everything is dirty" flag to git and do the
+		# Watchman query just to get it over with now so we won't pay
+		# the cost in git to look up each individual file.
+		my $o = watchman_clock();
+		$error = $output->{error};
+
+		die "Watchman: $error.\n" .
+		"Falling back to scanning...\n" if $error;
+
+		output_result($o->{clock}, ("/"));
+		$last_update_token = $o->{clock};
+
+		eval { launch_watchman() };
+		return 0;
+	}
+
+	die "Watchman: $error.\n" .
+	"Falling back to scanning...\n" if $error;
+
+	return 1;
+}
+
+sub get_working_dir {
+	my $working_dir;
+	if ($^O =~ 'msys' || $^O =~ 'cygwin') {
+		$working_dir = Win32::GetCwd();
+		$working_dir =~ tr/\\/\//;
+	} else {
+		require Cwd;
+		$working_dir = Cwd::cwd();
+	}
+
+	return $working_dir;
+}
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\post-update.sample ===
+#!/bin/sh
+#
+# An example hook script to prepare a packed repository for use over
+# dumb transports.
+#
+# To enable this hook, rename this file to "post-update".
+
+exec git update-server-info
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\pre-applypatch.sample ===
+#!/bin/sh
+#
+# An example hook script to verify what is about to be committed
+# by applypatch from an e-mail message.
+#
+# The hook should exit with non-zero status after issuing an
+# appropriate message if it wants to stop the commit.
+#
+# To enable this hook, rename this file to "pre-applypatch".
+
+. git-sh-setup
+precommit="$(git rev-parse --git-path hooks/pre-commit)"
+test -x "$precommit" && exec "$precommit" ${1+"$@"}
+:
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\pre-commit.sample ===
+#!/bin/sh
+#
+# An example hook script to verify what is about to be committed.
+# Called by "git commit" with no arguments.  The hook should
+# exit with non-zero status after issuing an appropriate message if
+# it wants to stop the commit.
+#
+# To enable this hook, rename this file to "pre-commit".
+
+if git rev-parse --verify HEAD >/dev/null 2>&1
+then
+	against=HEAD
+else
+	# Initial commit: diff against an empty tree object
+	against=$(git hash-object -t tree /dev/null)
+fi
+
+# If you want to allow non-ASCII filenames set this variable to true.
+allownonascii=$(git config --type=bool hooks.allownonascii)
+
+# Redirect output to stderr.
+exec 1>&2
+
+# Cross platform projects tend to avoid non-ASCII filenames; prevent
+# them from being added to the repository. We exploit the fact that the
+# printable range starts at the space character and ends with tilde.
+if [ "$allownonascii" != "true" ] &&
+	# Note that the use of brackets around a tr range is ok here, (it's
+	# even required, for portability to Solaris 10's /usr/bin/tr), since
+	# the square bracket bytes happen to fall in the designated range.
+	test $(git diff-index --cached --name-only --diff-filter=A -z $against |
+	  LC_ALL=C tr -d '[ -~]\0' | wc -c) != 0
+then
+	cat <<\EOF
+Error: Attempt to add a non-ASCII file name.
+
+This can cause problems if you want to work with people on other platforms.
+
+To be portable it is advisable to rename the file.
+
+If you know what you are doing you can disable this check using:
+
+  git config hooks.allownonascii true
+EOF
+	exit 1
+fi
+
+# If there are whitespace errors, print the offending file names and fail.
+exec git diff-index --check --cached $against --
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\pre-merge-commit.sample ===
+#!/bin/sh
+#
+# An example hook script to verify what is about to be committed.
+# Called by "git merge" with no arguments.  The hook should
+# exit with non-zero status after issuing an appropriate message to
+# stderr if it wants to stop the merge commit.
+#
+# To enable this hook, rename this file to "pre-merge-commit".
+
+. git-sh-setup
+test -x "$GIT_DIR/hooks/pre-commit" &&
+        exec "$GIT_DIR/hooks/pre-commit"
+:
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\pre-push.sample ===
+#!/bin/sh
+
+# An example hook script to verify what is about to be pushed.  Called by "git
+# push" after it has checked the remote status, but before anything has been
+# pushed.  If this script exits with a non-zero status nothing will be pushed.
+#
+# This hook is called with the following parameters:
+#
+# $1 -- Name of the remote to which the push is being done
+# $2 -- URL to which the push is being done
+#
+# If pushing without using a named remote those arguments will be equal.
+#
+# Information about the commits which are being pushed is supplied as lines to
+# the standard input in the form:
+#
+#   <local ref> <local oid> <remote ref> <remote oid>
+#
+# This sample shows how to prevent push of commits where the log message starts
+# with "WIP" (work in progress).
+
+remote="$1"
+url="$2"
+
+zero=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
+
+while read local_ref local_oid remote_ref remote_oid
+do
+	if test "$local_oid" = "$zero"
+	then
+		# Handle delete
+		:
+	else
+		if test "$remote_oid" = "$zero"
+		then
+			# New branch, examine all commits
+			range="$local_oid"
+		else
+			# Update to existing branch, examine new commits
+			range="$remote_oid..$local_oid"
+		fi
+
+		# Check for WIP commit
+		commit=$(git rev-list -n 1 --grep '^WIP' "$range")
+		if test -n "$commit"
+		then
+			echo >&2 "Found WIP commit in $local_ref, not pushing"
+			exit 1
+		fi
+	fi
+done
+
+exit 0
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\pre-rebase.sample ===
+#!/bin/sh
+#
+# Copyright (c) 2006, 2008 Junio C Hamano
+#
+# The "pre-rebase" hook is run just before "git rebase" starts doing
+# its job, and can prevent the command from running by exiting with
+# non-zero status.
+#
+# The hook is called with the following parameters:
+#
+# $1 -- the upstream the series was forked from.
+# $2 -- the branch being rebased (or empty when rebasing the current branch).
+#
+# This sample shows how to prevent topic branches that are already
+# merged to 'next' branch from getting rebased, because allowing it
+# would result in rebasing already published history.
+
+publish=next
+basebranch="$1"
+if test "$#" = 2
+then
+	topic="refs/heads/$2"
+else
+	topic=`git symbolic-ref HEAD` ||
+	exit 0 ;# we do not interrupt rebasing detached HEAD
+fi
+
+case "$topic" in
+refs/heads/??/*)
+	;;
+*)
+	exit 0 ;# we do not interrupt others.
+	;;
+esac
+
+# Now we are dealing with a topic branch being rebased
+# on top of master.  Is it OK to rebase it?
+
+# Does the topic really exist?
+git show-ref -q "$topic" || {
+	echo >&2 "No such branch $topic"
+	exit 1
+}
+
+# Is topic fully merged to master?
+not_in_master=`git rev-list --pretty=oneline ^master "$topic"`
+if test -z "$not_in_master"
+then
+	echo >&2 "$topic is fully merged to master; better remove it."
+	exit 1 ;# we could allow it, but there is no point.
+fi
+
+# Is topic ever merged to next?  If so you should not be rebasing it.
+only_next_1=`git rev-list ^master "^$topic" ${publish} | sort`
+only_next_2=`git rev-list ^master           ${publish} | sort`
+if test "$only_next_1" = "$only_next_2"
+then
+	not_in_topic=`git rev-list "^$topic" master`
+	if test -z "$not_in_topic"
+	then
+		echo >&2 "$topic is already up to date with master"
+		exit 1 ;# we could allow it, but there is no point.
+	else
+		exit 0
+	fi
+else
+	not_in_next=`git rev-list --pretty=oneline ^${publish} "$topic"`
+	/usr/bin/perl -e '
+		my $topic = $ARGV[0];
+		my $msg = "* $topic has commits already merged to public branch:\n";
+		my (%not_in_next) = map {
+			/^([0-9a-f]+) /;
+			($1 => 1);
+		} split(/\n/, $ARGV[1]);
+		for my $elem (map {
+				/^([0-9a-f]+) (.*)$/;
+				[$1 => $2];
+			} split(/\n/, $ARGV[2])) {
+			if (!exists $not_in_next{$elem->[0]}) {
+				if ($msg) {
+					print STDERR $msg;
+					undef $msg;
+				}
+				print STDERR " $elem->[1]\n";
+			}
+		}
+	' "$topic" "$not_in_next" "$not_in_master"
+	exit 1
+fi
+
+<<\DOC_END
+
+This sample hook safeguards topic branches that have been
+published from being rewound.
+
+The workflow assumed here is:
+
+ * Once a topic branch forks from "master", "master" is never
+   merged into it again (either directly or indirectly).
+
+ * Once a topic branch is fully cooked and merged into "master",
+   it is deleted.  If you need to build on top of it to correct
+   earlier mistakes, a new topic branch is created by forking at
+   the tip of the "master".  This is not strictly necessary, but
+   it makes it easier to keep your history simple.
+
+ * Whenever you need to test or publish your changes to topic
+   branches, merge them into "next" branch.
+
+The script, being an example, hardcodes the publish branch name
+to be "next", but it is trivial to make it configurable via
+$GIT_DIR/config mechanism.
+
+With this workflow, you would want to know:
+
+(1) ... if a topic branch has ever been merged to "next".  Young
+    topic branches can have stupid mistakes you would rather
+    clean up before publishing, and things that have not been
+    merged into other branches can be easily rebased without
+    affecting other people.  But once it is published, you would
+    not want to rewind it.
+
+(2) ... if a topic branch has been fully merged to "master".
+    Then you can delete it.  More importantly, you should not
+    build on top of it -- other people may already want to
+    change things related to the topic as patches against your
+    "master", so if you need further changes, it is better to
+    fork the topic (perhaps with the same name) afresh from the
+    tip of "master".
+
+Let's look at this example:
+
+		   o---o---o---o---o---o---o---o---o---o "next"
+		  /       /           /           /
+		 /   a---a---b A     /           /
+		/   /               /           /
+	       /   /   c---c---c---c B         /
+	      /   /   /             \         /
+	     /   /   /   b---b C     \       /
+	    /   /   /   /             \     /
+    ---o---o---o---o---o---o---o---o---o---o---o "master"
+
+
+A, B and C are topic branches.
+
+ * A has one fix since it was merged up to "next".
+
+ * B has finished.  It has been fully merged up to "master" and "next",
+   and is ready to be deleted.
+
+ * C has not merged to "next" at all.
+
+We would want to allow C to be rebased, refuse A, and encourage
+B to be deleted.
+
+To compute (1):
+
+	git rev-list ^master ^topic next
+	git rev-list ^master        next
+
+	if these match, topic has not merged in next at all.
+
+To compute (2):
+
+	git rev-list master..topic
+
+	if this is empty, it is fully merged to "master".
+
+DOC_END
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\pre-receive.sample ===
+#!/bin/sh
+#
+# An example hook script to make use of push options.
+# The example simply echoes all push options that start with 'echoback='
+# and rejects all pushes when the "reject" push option is used.
+#
+# To enable this hook, rename this file to "pre-receive".
+
+if test -n "$GIT_PUSH_OPTION_COUNT"
+then
+	i=0
+	while test "$i" -lt "$GIT_PUSH_OPTION_COUNT"
+	do
+		eval "value=\$GIT_PUSH_OPTION_$i"
+		case "$value" in
+		echoback=*)
+			echo "echo from the pre-receive-hook: ${value#*=}" >&2
+			;;
+		reject)
+			exit 1
+		esac
+		i=$((i + 1))
+	done
+fi
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\prepare-commit-msg.sample ===
+#!/bin/sh
+#
+# An example hook script to prepare the commit log message.
+# Called by "git commit" with the name of the file that has the
+# commit message, followed by the description of the commit
+# message's source.  The hook's purpose is to edit the commit
+# message file.  If the hook fails with a non-zero status,
+# the commit is aborted.
+#
+# To enable this hook, rename this file to "prepare-commit-msg".
+
+# This hook includes three examples. The first one removes the
+# "# Please enter the commit message..." help message.
+#
+# The second includes the output of "git diff --name-status -r"
+# into the message, just before the "git status" output.  It is
+# commented because it doesn't cope with --amend or with squashed
+# commits.
+#
+# The third example adds a Signed-off-by line to the message, that can
+# still be edited.  This is rarely a good idea.
+
+COMMIT_MSG_FILE=$1
+COMMIT_SOURCE=$2
+SHA1=$3
+
+/usr/bin/perl -i.bak -ne 'print unless(m/^. Please enter the commit message/..m/^#$/)' "$COMMIT_MSG_FILE"
+
+# case "$COMMIT_SOURCE,$SHA1" in
+#  ,|template,)
+#    /usr/bin/perl -i.bak -pe '
+#       print "\n" . `git diff --cached --name-status -r`
+# 	 if /^#/ && $first++ == 0' "$COMMIT_MSG_FILE" ;;
+#  *) ;;
+# esac
+
+# SOB=$(git var GIT_COMMITTER_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
+# git interpret-trailers --in-place --trailer "$SOB" "$COMMIT_MSG_FILE"
+# if test -z "$COMMIT_SOURCE"
+# then
+#   /usr/bin/perl -i.bak -pe 'print "\n" if !$first_line++' "$COMMIT_MSG_FILE"
+# fi
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\push-to-checkout.sample ===
+#!/bin/sh
+
+# An example hook script to update a checked-out tree on a git push.
+#
+# This hook is invoked by git-receive-pack(1) when it reacts to git
+# push and updates reference(s) in its repository, and when the push
+# tries to update the branch that is currently checked out and the
+# receive.denyCurrentBranch configuration variable is set to
+# updateInstead.
+#
+# By default, such a push is refused if the working tree and the index
+# of the remote repository has any difference from the currently
+# checked out commit; when both the working tree and the index match
+# the current commit, they are updated to match the newly pushed tip
+# of the branch. This hook is to be used to override the default
+# behaviour; however the code below reimplements the default behaviour
+# as a starting point for convenient modification.
+#
+# The hook receives the commit with which the tip of the current
+# branch is going to be updated:
+commit=$1
+
+# It can exit with a non-zero status to refuse the push (when it does
+# so, it must not modify the index or the working tree).
+die () {
+	echo >&2 "$*"
+	exit 1
+}
+
+# Or it can make any necessary changes to the working tree and to the
+# index to bring them to the desired state when the tip of the current
+# branch is updated to the new commit, and exit with a zero status.
+#
+# For example, the hook can simply run git read-tree -u -m HEAD "$1"
+# in order to emulate git fetch that is run in the reverse direction
+# with git push, as the two-tree form of git read-tree -u -m is
+# essentially the same as git switch or git checkout that switches
+# branches while keeping the local changes in the working tree that do
+# not interfere with the difference between the branches.
+
+# The below is a more-or-less exact translation to shell of the C code
+# for the default behaviour for git's push-to-checkout hook defined in
+# the push_to_deploy() function in builtin/receive-pack.c.
+#
+# Note that the hook will be executed from the repository directory,
+# not from the working tree, so if you want to perform operations on
+# the working tree, you will have to adapt your code accordingly, e.g.
+# by adding "cd .." or using relative paths.
+
+if ! git update-index -q --ignore-submodules --refresh
+then
+	die "Up-to-date check failed"
+fi
+
+if ! git diff-files --quiet --ignore-submodules --
+then
+	die "Working directory has unstaged changes"
+fi
+
+# This is a rough translation of:
+#
+#   head_has_history() ? "HEAD" : EMPTY_TREE_SHA1_HEX
+if git cat-file -e HEAD 2>/dev/null
+then
+	head=HEAD
+else
+	head=$(git hash-object -t tree --stdin </dev/null)
+fi
+
+if ! git diff-index --quiet --cached --ignore-submodules $head --
+then
+	die "Working directory has staged changes"
+fi
+
+if ! git read-tree -u -m "$commit"
+then
+	die "Could not update working tree to new HEAD"
+fi
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\sendemail-validate.sample ===
+#!/bin/sh
+
+# An example hook script to validate a patch (and/or patch series) before
+# sending it via email.
+#
+# The hook should exit with non-zero status after issuing an appropriate
+# message if it wants to prevent the email(s) from being sent.
+#
+# To enable this hook, rename this file to "sendemail-validate".
+#
+# By default, it will only check that the patch(es) can be applied on top of
+# the default upstream branch without conflicts in a secondary worktree. After
+# validation (successful or not) of the last patch of a series, the worktree
+# will be deleted.
+#
+# The following config variables can be set to change the default remote and
+# remote ref that are used to apply the patches against:
+#
+#   sendemail.validateRemote (default: origin)
+#   sendemail.validateRemoteRef (default: HEAD)
+#
+# Replace the TODO placeholders with appropriate checks according to your
+# needs.
+
+validate_cover_letter () {
+	file="$1"
+	# TODO: Replace with appropriate checks (e.g. spell checking).
+	true
+}
+
+validate_patch () {
+	file="$1"
+	# Ensure that the patch applies without conflicts.
+	git am -3 "$file" || return
+	# TODO: Replace with appropriate checks for this patch
+	# (e.g. checkpatch.pl).
+	true
+}
+
+validate_series () {
+	# TODO: Replace with appropriate checks for the whole series
+	# (e.g. quick build, coding style checks, etc.).
+	true
+}
+
+# main -------------------------------------------------------------------------
+
+if test "$GIT_SENDEMAIL_FILE_COUNTER" = 1
+then
+	remote=$(git config --default origin --get sendemail.validateRemote) &&
+	ref=$(git config --default HEAD --get sendemail.validateRemoteRef) &&
+	worktree=$(mktemp --tmpdir -d sendemail-validate.XXXXXXX) &&
+	git worktree add -fd --checkout "$worktree" "refs/remotes/$remote/$ref" &&
+	git config --replace-all sendemail.validateWorktree "$worktree"
+else
+	worktree=$(git config --get sendemail.validateWorktree)
+fi || {
+	echo "sendemail-validate: error: failed to prepare worktree" >&2
+	exit 1
+}
+
+unset GIT_DIR GIT_WORK_TREE
+cd "$worktree" &&
+
+if grep -q "^diff --git " "$1"
+then
+	validate_patch "$1"
+else
+	validate_cover_letter "$1"
+fi &&
+
+if test "$GIT_SENDEMAIL_FILE_COUNTER" = "$GIT_SENDEMAIL_FILE_TOTAL"
+then
+	git config --unset-all sendemail.validateWorktree &&
+	trap 'git worktree remove -ff "$worktree"' EXIT &&
+	validate_series
+fi
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\hooks\update.sample ===
+#!/bin/sh
+#
+# An example hook script to block unannotated tags from entering.
+# Called by "git receive-pack" with arguments: refname sha1-old sha1-new
+#
+# To enable this hook, rename this file to "update".
+#
+# Config
+# ------
+# hooks.allowunannotated
+#   This boolean sets whether unannotated tags will be allowed into the
+#   repository.  By default they won't be.
+# hooks.allowdeletetag
+#   This boolean sets whether deleting tags will be allowed in the
+#   repository.  By default they won't be.
+# hooks.allowmodifytag
+#   This boolean sets whether a tag may be modified after creation. By default
+#   it won't be.
+# hooks.allowdeletebranch
+#   This boolean sets whether deleting branches will be allowed in the
+#   repository.  By default they won't be.
+# hooks.denycreatebranch
+#   This boolean sets whether remotely creating branches will be denied
+#   in the repository.  By default this is allowed.
+#
+
+# --- Command line
+refname="$1"
+oldrev="$2"
+newrev="$3"
+
+# --- Safety check
+if [ -z "$GIT_DIR" ]; then
+	echo "Don't run this script from the command line." >&2
+	echo " (if you want, you could supply GIT_DIR then run" >&2
+	echo "  $0 <ref> <oldrev> <newrev>)" >&2
+	exit 1
+fi
+
+if [ -z "$refname" -o -z "$oldrev" -o -z "$newrev" ]; then
+	echo "usage: $0 <ref> <oldrev> <newrev>" >&2
+	exit 1
+fi
+
+# --- Config
+allowunannotated=$(git config --type=bool hooks.allowunannotated)
+allowdeletebranch=$(git config --type=bool hooks.allowdeletebranch)
+denycreatebranch=$(git config --type=bool hooks.denycreatebranch)
+allowdeletetag=$(git config --type=bool hooks.allowdeletetag)
+allowmodifytag=$(git config --type=bool hooks.allowmodifytag)
+
+# check for no description
+projectdesc=$(sed -e '1q' "$GIT_DIR/description")
+case "$projectdesc" in
+"Unnamed repository"* | "")
+	echo "*** Project description file hasn't been set" >&2
+	exit 1
+	;;
+esac
+
+# --- Check types
+# if $newrev is 0000...0000, it's a commit to delete a ref.
+zero=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
+if [ "$newrev" = "$zero" ]; then
+	newrev_type=delete
+else
+	newrev_type=$(git cat-file -t $newrev)
+fi
+
+case "$refname","$newrev_type" in
+	refs/tags/*,commit)
+		# un-annotated tag
+		short_refname=${refname##refs/tags/}
+		if [ "$allowunannotated" != "true" ]; then
+			echo "*** The un-annotated tag, $short_refname, is not allowed in this repository" >&2
+			echo "*** Use 'git tag [ -a | -s ]' for tags you want to propagate." >&2
+			exit 1
+		fi
+		;;
+	refs/tags/*,delete)
+		# delete tag
+		if [ "$allowdeletetag" != "true" ]; then
+			echo "*** Deleting a tag is not allowed in this repository" >&2
+			exit 1
+		fi
+		;;
+	refs/tags/*,tag)
+		# annotated tag
+		if [ "$allowmodifytag" != "true" ] && git rev-parse $refname > /dev/null 2>&1
+		then
+			echo "*** Tag '$refname' already exists." >&2
+			echo "*** Modifying a tag is not allowed in this repository." >&2
+			exit 1
+		fi
+		;;
+	refs/heads/*,commit)
+		# branch
+		if [ "$oldrev" = "$zero" -a "$denycreatebranch" = "true" ]; then
+			echo "*** Creating a branch is not allowed in this repository" >&2
+			exit 1
+		fi
+		;;
+	refs/heads/*,delete)
+		# delete branch
+		if [ "$allowdeletebranch" != "true" ]; then
+			echo "*** Deleting a branch is not allowed in this repository" >&2
+			exit 1
+		fi
+		;;
+	refs/remotes/*,commit)
+		# tracking branch
+		;;
+	refs/remotes/*,delete)
+		# delete tracking branch
+		if [ "$allowdeletebranch" != "true" ]; then
+			echo "*** Deleting a tracking branch is not allowed in this repository" >&2
+			exit 1
+		fi
+		;;
+	*)
+		# Anything else (is there anything else?)
+		echo "*** Update hook: unknown type of update to ref $refname of type $newrev_type" >&2
+		exit 1
+		;;
+esac
+
+# --- Finished
+exit 0
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\info\exclude ===
+# git ls-files --others --exclude-from=.git/info/exclude
+# Lines that start with '#' are comments.
+# For a project mostly in C, the following would be a good set of
+# exclude patterns (uncomment them if you want to use them):
+# *.[oa]
+# *~
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\logs\HEAD ===
+0000000000000000000000000000000000000000 a3cebc31f695aaebf1ebd518e8fc256285c08b88 h8815 <shimanshu8181@gmail.com> 1768750285 +0530	clone: from https://github.com/h8815/3-tier-PHP-application.git
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\logs\refs\heads\main ===
+0000000000000000000000000000000000000000 a3cebc31f695aaebf1ebd518e8fc256285c08b88 h8815 <shimanshu8181@gmail.com> 1768750285 +0530	clone: from https://github.com/h8815/3-tier-PHP-application.git
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\logs\refs\remotes\origin\HEAD ===
+0000000000000000000000000000000000000000 a3cebc31f695aaebf1ebd518e8fc256285c08b88 h8815 <shimanshu8181@gmail.com> 1768750285 +0530	clone: from https://github.com/h8815/3-tier-PHP-application.git
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\objects\pack\pack-25497b47fca503030053f125382c1ab7f2ba98f5.idx ===
+[SKIPPED] Binary file or unsupported encoding.
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\objects\pack\pack-25497b47fca503030053f125382c1ab7f2ba98f5.pack ===
+[SKIPPED] Binary file or unsupported encoding.
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\objects\pack\pack-25497b47fca503030053f125382c1ab7f2ba98f5.rev ===
+[SKIPPED] Binary file or unsupported encoding.
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\refs\heads\main ===
+a3cebc31f695aaebf1ebd518e8fc256285c08b88
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\.git\refs\remotes\origin\HEAD ===
+ref: refs/remotes/origin/main
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\backend\Dockerfile ===
+FROM php:8.2-apache
+
+WORKDIR /var/www/html
+
+# Install only required extensions
+RUN docker-php-ext-install mysqli opcache
+
+# Enable Apache modules
+RUN a2enmod rewrite headers
+
+# Copy source
+COPY src/ /var/www/html/
+
+# Permissions
+RUN chown -R www-data:www-data /var/www/html \
+    && chmod -R 755 /var/www/html
+
+# Uploads
+RUN mkdir -p /var/www/html/uploads \
+    && chown -R www-data:www-data /var/www/html/uploads
+
+EXPOSE 80
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\backend\src\.htaccess ===
+# Allow API access
+<Files "*.php">
+  <RequireAll>
+    Require all granted
+  </RequireAll>
+</Files>
+
+# Block sensitive files
+<FilesMatch "\.(env|log|ini|sql|bak|old)$">
+  Require all denied
+</FilesMatch>
+
+# Security headers
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "DENY"
+  Header set X-XSS-Protection "1; mode=block"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+  Header set Access-Control-Allow-Origin "*"
+  Header set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+  Header set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+  Header set Access-Control-Allow-Credentials "true"
+</IfModule>
+
+# Rate limiting (if mod_evasive is available)
+<IfModule mod_evasive24.c>
+    DOSHashTableSize    2048
+    DOSPageCount        10
+    DOSPageInterval     1
+    DOSSiteCount        50
+    DOSSiteInterval     1
+    DOSBlockingPeriod   600
+</IfModule>
+
+Options -Indexes
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\backend\src\cors-helper.php ===
+<?php
+// CORS Helper Functions
+
+function getAllowedOrigins() {
+    $allowedOrigins = getenv('ALLOWED_ORIGINS') ?: 'http://localhost:3000';
+    return array_map('trim', explode(',', $allowedOrigins));
+}
+
+function setCorsHeaders() {
+    $allowedOrigins = getAllowedOrigins();
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+    
+    // Check if the origin is in the allowed list
+    if (in_array($origin, $allowedOrigins)) {
+        header("Access-Control-Allow-Origin: $origin");
+    } else if (strpos($origin, 'localhost') !== false || strpos($origin, '127.0.0.1') !== false) {
+        // Allow localhost variations for development
+        header("Access-Control-Allow-Origin: $origin");
+    } else {
+        // Default to first allowed origin or wildcard for development
+        $defaultOrigin = !empty($allowedOrigins) ? $allowedOrigins[0] : '*';
+        header("Access-Control-Allow-Origin: $defaultOrigin");
+    }
+    
+    header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+    header('Access-Control-Allow-Credentials: true');
+    header('Access-Control-Max-Age: 86400'); // Cache preflight for 24 hours
+}
+
+function validateOrigin() {
+    // Always allow CLI access
+    if (php_sapi_name() === 'cli') {
+        return true;
+    }
+    
+    $allowedOrigins = getAllowedOrigins();
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+    $referer = $_SERVER['HTTP_REFERER'] ?? '';
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+    
+    // Check origin first
+    if ($origin && in_array($origin, $allowedOrigins)) {
+        return true;
+    }
+    
+    // Check referer as fallback
+    if ($referer) {
+        foreach ($allowedOrigins as $allowedOrigin) {
+            if (strpos($referer, $allowedOrigin) === 0) {
+                return true;
+            }
+        }
+    }
+    
+    // Allow same-host requests (internal requests)
+    if ($host && (strpos($host, 'localhost') !== false || strpos($host, '127.0.0.1') !== false)) {
+        return true;
+    }
+    
+    // Allow requests from nginx proxy (internal container communication)
+    if (empty($origin) && empty($referer)) {
+        return true;
+    }
+    
+    return false;
+}
+?>
+
+=== FILE: d:\Projects\3-tier-PHP-application\backend\src\create_admin.php ===
+<?php
+// CLI ADMIN CREATION TOOL
+// Usage: docker exec -it <container> php create_admin.php
+
+$_SERVER['REQUEST_METHOD'] = 'CLI';
+require_once 'db.php';
+
+echo "🎨 NEO-BRUTALIST STUDENT HUB - ADMIN CREATOR 🎨\n";
+echo "===============================================\n\n";
+
+// Get username
+echo "Enter admin username: ";
+$username = trim(fgets(STDIN));
+
+if (empty($username)) {
+    echo "❌ Error: Username cannot be empty.\n";
+    exit(1);
+}
+
+// Get password
+echo "Enter admin password: ";
+$password = trim(fgets(STDIN));
+
+if (empty($password)) {
+    echo "❌ Error: Password cannot be empty.\n";
+    exit(1);
+}
+
+// Confirm password
+echo "Confirm password: ";
+$confirmPassword = trim(fgets(STDIN));
+
+if ($password !== $confirmPassword) {
+    echo "❌ Error: Passwords do not match.\n";
+    exit(1);
+}
+
+try {
+    // Check if users table exists, create if not
+    $tableCheck = $conn->query("SHOW TABLES LIKE 'users'");
+    if ($tableCheck->num_rows == 0) {
+        echo "📦 Creating users table...\n";
+        $createTable = "CREATE TABLE users (
+            id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(50) NOT NULL UNIQUE,
+            password_hash VARCHAR(255) NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )";
+        $conn->query($createTable);
+    }
+    
+    // Check if username exists
+    $checkSql = "SELECT id FROM users WHERE username = ?";
+    $checkStmt = $conn->prepare($checkSql);
+    $checkStmt->bind_param("s", $username);
+    $checkStmt->execute();
+    $result = $checkStmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        echo "❌ Error: Username '$username' already exists.\n";
+        exit(1);
+    }
+    
+    // Hash password with ARGON2ID
+    $passwordHash = password_hash($password, PASSWORD_ARGON2ID);
+    
+    // Insert new admin
+    $insertSql = "INSERT INTO users (username, password_hash) VALUES (?, ?)";
+    $insertStmt = $conn->prepare($insertSql);
+    $insertStmt->bind_param("ss", $username, $passwordHash);
+    
+    if ($insertStmt->execute()) {
+        echo "\n✅ SUCCESS: Admin user '$username' created!\n";
+        echo "🚀 You can now login to the Neo-Brutalist Hub!\n\n";
+    } else {
+        echo "❌ Error: Failed to create admin user.\n";
+        exit(1);
+    }
+    
+} catch (Exception $e) {
+    echo "❌ Error: " . $e->getMessage() . "\n";
+    exit(1);
+} finally {
+    $conn->close();
+}
+?>
+
+=== FILE: d:\Projects\3-tier-PHP-application\backend\src\db.php ===
+<?php
+// TIER 3: DATA LAYER CONNECTION - Environment Variable Ready
+
+// Disable error display in production
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
+// Session configuration for shared sessions across requests
+ini_set('session.save_path', getenv('SESSION_SAVE_PATH') ?: '/tmp/sessions');
+ini_set('session.gc_probability', 1);
+ini_set('session.gc_divisor', 100);
+
+// Retrieve credentials from environment variables
+$servername = getenv('DB_HOST') ?: 'database';
+$username = getenv('DB_USER') ?: 'DBuser';
+$password = getenv('DB_PASSWORD') ?: 'root';
+$dbname = getenv('DB_NAME') ?: 'student_db';
+
+// Validate that all required environment variables are set
+if (!$servername || !$username || $password === false || !$dbname) {
+    if (php_sapi_name() === 'cli') {
+        echo "Error: Missing required environment variables.\n";
+        exit(1);
+    }
+    
+    // Only set headers if not already sent
+    if (!headers_sent()) {
+        header('Content-Type: application/json');
+        http_response_code(500);
+    }
+    
+    die(json_encode([
+        "error" => "Missing required environment variables",
+        "detail" => "Please set DB_HOST, DB_USER, DB_PASSWORD, and DB_NAME"
+    ]));
+}
+
+define('DB_TABLE_STUDENT', 'student');
+
+// Only set CORS headers if not already sent and not in CLI mode
+if (!headers_sent() && php_sapi_name() !== 'cli') {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With');
+    header('Access-Control-Allow-Credentials: true');
+
+    // Handle browser preflight OPTIONS request
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+        http_response_code(200);
+        exit;
+    }
+}
+
+try {
+    $conn = new mysqli($servername, $username, $password, $dbname);
+    
+    if ($conn->connect_error) {
+        throw new Exception("Database connection failed: " . $conn->connect_error);
+    }
+
+    // Set charset to utf8mb4 for better compatibility
+    $conn->set_charset("utf8mb4");
+    
+} catch (Exception $e) {
+    if (php_sapi_name() === 'cli') {
+        echo "Database Error: " . $e->getMessage() . "\n";
+        exit(1);
+    }
+    
+    if (!headers_sent()) {
+        header('Content-Type: application/json');
+        http_response_code(500);
+    }
+    
+    die(json_encode([
+        "error" => "Database connection failed",
+        "detail" => $e->getMessage()
+    ]));
+}
+?>
+
+=== FILE: d:\Projects\3-tier-PHP-application\backend\src\inspect_db.php ===
+<?php
+// Database inspection tool
+$_SERVER['REQUEST_METHOD'] = 'CLI';
+require_once 'db.php';
+
+echo "=== Database Schema Inspector ===\n\n";
+
+// Check if users table exists
+$result = $conn->query("SHOW TABLES LIKE 'users'");
+if ($result->num_rows > 0) {
+    echo "Users table exists. Columns:\n";
+    $columns = $conn->query("DESCRIBE users");
+    while ($row = $columns->fetch_assoc()) {
+        echo "- {$row['Field']} ({$row['Type']})\n";
+    }
+} else {
+    echo "Users table does not exist.\n";
+    echo "Available tables:\n";
+    $tables = $conn->query("SHOW TABLES");
+    while ($row = $tables->fetch_array()) {
+        echo "- {$row[0]}\n";
+    }
+}
+
+$conn->close();
+?>
+
+=== FILE: d:\Projects\3-tier-PHP-application\backend\src\api\auth.php ===
+<?php
+// TIER 2: AUTHENTICATION API
+
+// Configure session before starting
+ini_set('session.cookie_httponly', 1);
+ini_set('session.cookie_secure', 0); // Set to 1 if using HTTPS
+ini_set('session.cookie_samesite', 'Lax');
+ini_set('session.use_strict_mode', 1);
+
+// Start session first
+session_start();
+
+// Disable error display
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
+// Include CORS helper
+require_once dirname(__DIR__) . '/cors-helper.php';
+
+// Set headers BEFORE including db.php
+header('Content-Type: application/json');
+setCorsHeaders();
+
+// Handle preflight
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
+try {
+    // Include database connection
+    require_once dirname(__DIR__) . '/db.php';
+
+    $method = $_SERVER['REQUEST_METHOD'];
+
+    $data = [];
+    if (in_array($method, ['POST', 'DELETE'])) {
+        $input_json = file_get_contents('php://input');
+        $data = json_decode($input_json, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception('Invalid JSON input');
+        }
+    }
+
+    // --- POST Request (Login) ---
+    if ($method === 'POST') {
+        $username = trim($data['username'] ?? '');
+        $password = $data['password'] ?? '';
+        
+        if (empty($username) || empty($password)) {
+            http_response_code(400);
+            echo json_encode(['status' => 'error', 'message' => 'Username and password required']);
+            exit;
+        }
+        
+        // Check if users table exists
+        $tableCheck = $conn->query("SHOW TABLES LIKE 'users'");
+        if ($tableCheck->num_rows == 0) {
+            http_response_code(401);
+            echo json_encode(['status' => 'error', 'message' => 'No admin users exist. Please create one using CLI.']);
+            exit;
+        }
+        
+        $sql = "SELECT id, username, password_hash FROM users WHERE username = ?";
+        $stmt = $conn->prepare($sql);
+
+        if (!$stmt) {
+            throw new Exception('Database prepare failed: ' . $conn->error);
+        }
+
+        $stmt->bind_param("s", $username);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $user = $result->fetch_assoc();
+
+        if (!$user || !password_verify($password, $user['password_hash'])) {
+            http_response_code(401);
+            echo json_encode(['status' => 'error', 'message' => 'Invalid credentials']);
+            exit;
+        }
+
+        // Set session variables with correct names
+        $_SESSION['admin_id'] = $user['id'];
+        $_SESSION['admin_username'] = $user['username'];
+        $_SESSION['admin_logged_in'] = true;
+        $_SESSION['authenticated'] = true;
+        $_SESSION['username'] = $user['username'];
+        $_SESSION['user_id'] = $user['id'];
+        $_SESSION['last_activity'] = time();
+
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'Welcome to the Neo-Brutalist Hub!',
+            'user' => [
+                'id' => $user['id'],
+                'username' => $user['username']
+            ]
+        ]);
+        exit;
+    }
+
+    // --- GET Request (Check session) ---
+    elseif ($method === 'GET') {
+        if (isset($_SESSION['authenticated']) && $_SESSION['authenticated'] === true) {
+            echo json_encode([
+                'status' => 'authenticated',
+                'user' => [
+                    'id' => $_SESSION['user_id'] ?? null,
+                    'username' => $_SESSION['username'] ?? null
+                ]
+            ]);
+        } else {
+            http_response_code(401);
+            echo json_encode(['status' => 'unauthenticated']);
+        }
+        exit;
+    }
+
+    // --- DELETE Request (Logout) ---
+    elseif ($method === 'DELETE') {
+        session_unset();
+        session_destroy();
+        echo json_encode(['status' => 'success', 'message' => 'Logged out successfully']);
+        exit;
+    }
+
+    else {
+        http_response_code(405);
+        echo json_encode(['status' => 'error', 'message' => 'Method not supported']);
+        exit;
+    }
+
+} catch (Exception $e) {
+    http_response_code(500);
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'Internal server error',
+        'detail' => $e->getMessage()
+    ]);
+    exit;
+}
+?>
+
+=== FILE: d:\Projects\3-tier-PHP-application\backend\src\api\config.php ===
+<?php
+// Disable error display, log instead
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
+// Include CORS helper
+require_once dirname(__DIR__) . '/cors-helper.php';
+
+// Config endpoint to provide API URLs to frontend
+header('Content-Type: application/json');
+setCorsHeaders();
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
+// Validate origin for security (disabled for development)
+// if (!validateOrigin() && php_sapi_name() !== 'cli') {
+//     http_response_code(403);
+//     echo json_encode(['status' => 'error', 'message' => 'Origin not allowed']);
+//     exit;
+// }
+
+try {
+    // Get the base URL from environment or detect from request
+    $apiBaseUrl = getenv('API_BASE_URL');
+
+    // If not set, try to detect from request
+    if (!$apiBaseUrl) {
+        $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost:3000';
+        $apiBaseUrl = "$protocol://$host";
+    }
+
+    echo json_encode([
+        'apiBaseUrl' => $apiBaseUrl,
+        'studentsUrl' => $apiBaseUrl . '/api/students.php',
+        'authUrl' => $apiBaseUrl . '/api/auth.php'
+    ]);
+} catch (Exception $e) {
+    http_response_code(500);
+    echo json_encode([
+        'error' => 'Configuration error',
+        'message' => $e->getMessage()
+    ]);
+}
+?>
+
+=== FILE: d:\Projects\3-tier-PHP-application\backend\src\api\remove-photo.php ===
+<?php
+// Disable error display in production
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
+// Include CORS helper
+require_once dirname(__DIR__) . '/cors-helper.php';
+
+// Set headers
+header('Content-Type: application/json');
+setCorsHeaders();
+
+// Handle preflight
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
+// Validate origin for security
+if (!validateOrigin() && php_sapi_name() !== 'cli') {
+    http_response_code(403);
+    echo json_encode(['status' => 'error', 'message' => 'Origin not allowed']);
+    exit;
+}
+
+session_start();
+
+// Check authentication
+if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
+    http_response_code(401);
+    echo json_encode(['status' => 'error', 'message' => 'Authentication required']);
+    exit;
+}
+
+header('Content-Type: application/json');
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['status' => 'error', 'message' => 'Method not allowed']);
+    exit;
+}
+
+require_once dirname(__DIR__) . '/db.php';
+
+try {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $student_id = $input['student_id'] ?? null;
+    
+    if (!$student_id) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Student ID required']);
+        exit;
+    }
+    
+    // Get current photo path
+    $sql = "SELECT profile_photo FROM " . DB_TABLE_STUDENT . " WHERE ID = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $student_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $student = $result->fetch_assoc();
+    
+    if (!$student) {
+        http_response_code(404);
+        echo json_encode(['status' => 'error', 'message' => 'Student not found']);
+        exit;
+    }
+    
+    // Remove photo from database
+    $sql = "UPDATE " . DB_TABLE_STUDENT . " SET profile_photo = NULL WHERE ID = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $student_id);
+    
+    if ($stmt->execute()) {
+        // Try to delete physical file
+        if ($student['profile_photo']) {
+            $filePath = '/var/www/html/' . $student['profile_photo'];
+            if (file_exists($filePath)) {
+                unlink($filePath);
+            }
+        }
+        
+        echo json_encode([
+            'status' => 'success',
+            'message' => 'Photo removed successfully'
+        ]);
+    } else {
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Database update failed']);
+    }
+    
+} catch (Exception $e) {
+    http_response_code(500);
+    echo json_encode(['status' => 'error', 'message' => 'Server error: ' . $e->getMessage()]);
+}
+?>
+
+=== FILE: d:\Projects\3-tier-PHP-application\backend\src\api\students.php ===
+<?php
+// TIER 2: STUDENTS API WITH IMAGE UPLOAD & ENHANCED FEATURES
+
+session_start();
+
+// Include CORS helper
+require_once dirname(__DIR__) . '/cors-helper.php';
+
+include '../db.php';
+
+header('Content-Type: application/json');
+header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+setCorsHeaders();
+
+// Handle preflight
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
+$method = $_SERVER['REQUEST_METHOD'];
+
+function isAuthenticated() {
+    return isset($_SESSION['authenticated']) && $_SESSION['authenticated'] === true;
+}
+
+function handleImageUpload($file) {
+    $uploadDir = '/var/www/html/uploads/';
+    if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
+    
+    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!in_array($file['type'], $allowedTypes) || $file['size'] > 5242880) {
+        return null;
+    }
+    
+    $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
+    $filename = uniqid('student_') . '.' . $extension;
+    $filepath = $uploadDir . $filename;
+    
+    if (move_uploaded_file($file['tmp_name'], $filepath)) {
+        return 'uploads/' . $filename;
+    }
+    return null;
+}
+
+// --- GET Request ---
+if ($method === 'GET') {
+    if (!isAuthenticated()) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'Authentication required']);
+        exit;
+    }
+    
+    $id = $_GET['id'] ?? null;
+    
+    if ($id) {
+        $sql = "SELECT * FROM " . DB_TABLE_STUDENT . " WHERE ID = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $student = $result->fetch_assoc();
+        
+        if ($student) {
+            echo json_encode(['status' => 'success', 'data' => $student]);
+        } else {
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Student not found']);
+        }
+    } else {
+        // Pagination & filtering
+        $page = max(1, (int)($_GET['page'] ?? 1));
+        $limit = min(50, max(1, (int)($_GET['limit'] ?? 12)));
+        $offset = ($page - 1) * $limit;
+        
+        $sortBy = in_array($_GET['sort_by'] ?? '', ['ID', 'Name', 'Email', 'Age', 'enrollment_date']) ? $_GET['sort_by'] : 'ID';
+        $order = strtoupper($_GET['order'] ?? 'ASC') === 'DESC' ? 'DESC' : 'ASC';
+        
+        $search = $_GET['search'] ?? '';
+        $statusFilter = $_GET['status'] ?? '';
+        
+        $whereConditions = [];
+        $params = [];
+        $types = '';
+        
+        if (!empty($search)) {
+            $whereConditions[] = "(Name LIKE ? OR Email LIKE ?)";
+            $searchParam = "%$search%";
+            $params[] = $searchParam;
+            $params[] = $searchParam;
+            $types .= 'ss';
+        }
+        
+        if (!empty($statusFilter)) {
+            $whereConditions[] = "status = ?";
+            $params[] = $statusFilter;
+            $types .= 's';
+        }
+        
+        $whereClause = !empty($whereConditions) ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
+        
+        // Count total
+        $countSql = "SELECT COUNT(*) as total FROM " . DB_TABLE_STUDENT . " $whereClause";
+        if (!empty($params)) {
+            $countStmt = $conn->prepare($countSql);
+            $countStmt->bind_param($types, ...$params);
+            $countStmt->execute();
+            $totalResult = $countStmt->get_result();
+        } else {
+            $totalResult = $conn->query($countSql);
+        }
+        $totalRecords = $totalResult->fetch_assoc()['total'];
+        
+        // Get data
+        $sql = "SELECT * FROM " . DB_TABLE_STUDENT . " $whereClause ORDER BY $sortBy $order LIMIT ? OFFSET ?";
+        $params[] = $limit;
+        $params[] = $offset;
+        $types .= 'ii';
+        
+        $stmt = $conn->prepare($sql);
+        if (!empty($params)) {
+            $stmt->bind_param($types, ...$params);
+        }
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $students = $result->fetch_all(MYSQLI_ASSOC);
+        
+        // Status counts
+        $statusSql = "SELECT status, COUNT(*) as count FROM " . DB_TABLE_STUDENT . " GROUP BY status";
+        $statusResult = $conn->query($statusSql);
+        $statusCounts = [];
+        while ($row = $statusResult->fetch_assoc()) {
+            $statusCounts[$row['status']] = (int)$row['count'];
+        }
+        
+        echo json_encode([
+            'status' => 'success',
+            'data' => $students,
+            'pagination' => [
+                'page' => $page,
+                'limit' => $limit,
+                'total' => (int)$totalRecords,
+                'pages' => ceil($totalRecords / $limit)
+            ],
+            'statusCounts' => $statusCounts
+        ]);
+    }
+}
+
+// --- POST Request ---
+elseif ($method === 'POST') {
+    if (!isAuthenticated()) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'Authentication required']);
+        exit;
+    }
+    
+    $name = trim($_POST['name'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $age = (int)($_POST['age'] ?? 0);
+    $phone = trim($_POST['phone'] ?? '');
+    $address = trim($_POST['address'] ?? '');
+    $status = $_POST['status'] ?? 'active';
+    
+    if (empty($name) || empty($email) || $age < 10 || $age > 100) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Invalid input data']);
+        exit;
+    }
+    
+    $profilePhoto = null;
+    if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] === UPLOAD_ERR_OK) {
+        $profilePhoto = handleImageUpload($_FILES['profile_photo']);
+    }
+    
+    $sql = "INSERT INTO " . DB_TABLE_STUDENT . " (Name, Email, Age, phone, address, status, profile_photo) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("ssissss", $name, $email, $age, $phone, $address, $status, $profilePhoto);
+    
+    if ($stmt->execute()) {
+        http_response_code(201);
+        echo json_encode(['status' => 'inserted', 'id' => $conn->insert_id, 'message' => 'Student added successfully']);
+    } else {
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Database error']);
+    }
+}
+
+// --- PUT Request ---
+elseif ($method === 'PUT') {
+    if (!isAuthenticated()) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'Authentication required']);
+        exit;
+    }
+    
+    $input = json_decode(file_get_contents('php://input'), true);
+    $id = $input['id'] ?? null;
+    
+    if (!$id) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'ID required']);
+        exit;
+    }
+    
+    $sql = "UPDATE " . DB_TABLE_STUDENT . " SET Name = ?, Email = ?, Age = ?, phone = ?, address = ?, status = ? WHERE ID = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("ssisssi", $input['name'], $input['email'], $input['age'], $input['phone'], $input['address'], $input['status'], $id);
+    
+    if ($stmt->execute()) {
+        echo json_encode(['status' => 'updated', 'id' => $id, 'message' => 'Student updated successfully']);
+    } else {
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Update failed']);
+    }
+}
+
+// --- DELETE Request ---
+elseif ($method === 'DELETE') {
+    if (!isAuthenticated()) {
+        http_response_code(401);
+        echo json_encode(['status' => 'error', 'message' => 'Authentication required']);
+        exit;
+    }
+    
+    $input = json_decode(file_get_contents('php://input'), true);
+    $id = $input['id'] ?? null;
+    
+    if (!$id) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'ID required']);
+        exit;
+    }
+    
+    $sql = "DELETE FROM " . DB_TABLE_STUDENT . " WHERE ID = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $id);
+    
+    if ($stmt->execute()) {
+        echo json_encode(['status' => 'deleted', 'id' => $id, 'message' => 'Student deleted successfully']);
+    } else {
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Delete failed']);
+    }
+}
+
+else {
+    http_response_code(405);
+    echo json_encode(['status' => 'error', 'message' => 'Method not supported']);
+}
+
+$conn->close();
+?>
+
+=== FILE: d:\Projects\3-tier-PHP-application\backend\src\api\upload-photo.php ===
+<?php
+// Disable error display in production
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
+// Include CORS helper
+require_once dirname(__DIR__) . '/cors-helper.php';
+
+// Set headers BEFORE including db.php
+header('Content-Type: application/json');
+setCorsHeaders();
+
+// Handle preflight
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
+// Validate origin for security
+if (!validateOrigin() && php_sapi_name() !== 'cli') {
+    http_response_code(403);
+    echo json_encode(['status' => 'error', 'message' => 'Origin not allowed']);
+    exit;
+}
+
+session_start();
+
+// Check authentication
+if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
+    http_response_code(401);
+    echo json_encode(['status' => 'error', 'message' => 'Authentication required']);
+    exit;
+}
+
+header('Content-Type: application/json');
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['status' => 'error', 'message' => 'Method not allowed']);
+    exit;
+}
+
+require_once dirname(__DIR__) . '/db.php';
+
+try {
+    $student_id = $_POST['student_id'] ?? null;
+    
+    if (!$student_id || !isset($_FILES['profile_photo'])) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Student ID and photo file required']);
+        exit;
+    }
+    
+    $file = $_FILES['profile_photo'];
+    
+    // Validate file
+    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!in_array($file['type'], $allowedTypes)) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Invalid file type. Only JPG, PNG, GIF, WEBP allowed']);
+        exit;
+    }
+    
+    if ($file['size'] > 5242880) { // 5MB
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'File size must be less than 5MB']);
+        exit;
+    }
+    
+    // Create uploads directory if it doesn't exist
+    $uploadDir = '/var/www/html/uploads/';
+    if (!is_dir($uploadDir)) {
+        mkdir($uploadDir, 0755, true);
+    }
+    
+    // Generate unique filename
+    $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
+    $filename = 'student_' . $student_id . '_' . uniqid() . '.' . $extension;
+    $filepath = $uploadDir . $filename;
+    
+    // Move uploaded file
+    if (move_uploaded_file($file['tmp_name'], $filepath)) {
+        // Update database
+        $photoPath = 'uploads/' . $filename;
+        $sql = "UPDATE " . DB_TABLE_STUDENT . " SET profile_photo = ? WHERE ID = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("si", $photoPath, $student_id);
+        
+        if ($stmt->execute()) {
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Photo uploaded successfully',
+                'photo_path' => $photoPath
+            ]);
+        } else {
+            // Remove uploaded file if database update fails
+            unlink($filepath);
+            http_response_code(500);
+            echo json_encode(['status' => 'error', 'message' => 'Database update failed']);
+        }
+    } else {
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'File upload failed']);
+    }
+    
+} catch (Exception $e) {
+    http_response_code(500);
+    echo json_encode(['status' => 'error', 'message' => 'Server error: ' . $e->getMessage()]);
+}
+?>
+
+=== FILE: d:\Projects\3-tier-PHP-application\backend\src\uploads\.htaccess ===
+# Allow access to uploaded images
+<Files "*">
+    Require all granted
+</Files>
+
+# Security headers for images
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set Cache-Control "public, max-age=31536000"
+</IfModule>
+
+# Prevent PHP execution in uploads
+<Files "*.php">
+    Require all denied
+</Files>
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\Dockerfile ===
+FROM php:8.2-apache
+
+WORKDIR /var/www/html
+
+# FIX: Changed "/src" to "src/"
+COPY src/ .
+
+# Frontend doesn't need mysqli, but it does need permissions
+RUN chown -R www-data:www-data /var/www/html
+
+EXPOSE 80
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\src\add-student.php ===
+<?php
+session_start();
+
+// Check authentication
+if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
+    header('Location: login.php');
+    exit;
+}
+?>
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <title>Add Student - Student Hub</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="favicon.ico">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="style.css" rel="stylesheet">
+</head>
+<body style="padding: 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh;">
+    
+    <!-- Header -->
+    <div class="page-header" style="background: white; border-radius: 15px; padding: 24px; margin-bottom: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.1);">
+        <div>
+            <h1 class="page-title" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.5rem; font-weight: 800;">ADD NEW STUDENT</h1>
+            <p class="page-subtitle" style="color: #6c757d;">Create a new student profile</p>
+        </div>
+        <div style="display: flex; gap: 16px;">
+            <span style="font-family: var(--font-mono); font-size: 14px; display: flex; align-items: center;">Welcome, <strong style="margin-left: 5px;"><?php echo htmlspecialchars($_SESSION['username'] ?? 'Admin'); ?></strong></span>
+            <a href="view.php" class="btn btn-primary shadow-sm">
+                <i class="bi bi-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+    </div>
+
+    <!-- Success/Error Messages -->
+    <div id="message-container" style="display: none; margin-bottom: 24px;">
+        <div id="message" class="alert"></div>
+    </div>
+
+    <!-- Add Student Form -->
+    <div class="card shadow-lg border-0" style="max-width: 900px; margin: 0 auto; border-radius: 15px; overflow: hidden;">
+        <div class="card-body p-5">
+            <form id="student-form" enctype="multipart/form-data" class="needs-validation" novalidate>
+                
+                <!-- Profile Photo Upload -->
+                <div style="margin-bottom: 32px; text-align: center;">
+                    <label class="form-label fw-bold">Profile Photo</label>
+                    <div class="drag-drop-area" id="drop-area" style="border: 3px dashed #667eea; border-radius: 15px; padding: 48px 24px; cursor: pointer; transition: all 0.3s;">
+                        <div id="drop-content">
+                            <div style="font-size: 4rem; margin-bottom: 16px;">📸</div>
+                            <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 1.2rem;">Drag & Drop Your Photo</p>
+                            <p style="margin: 0 0 16px 0; color: #6c757d;">or click to browse files</p>
+                            <button type="button" class="btn btn-outline-primary" onclick="document.getElementById('photo-input').click()">Choose File</button>
+                        </div>
+                        <div id="preview-container" style="display: none;">
+                            <img id="photo-preview" style="max-width: 200px; max-height: 200px; border: 3px solid #667eea; border-radius: 15px; object-fit: cover;">
+                            <p id="file-name" style="margin: 12px 0 0 0; font-weight: 500;"></p>
+                            <button type="button" class="btn btn-danger mt-3" onclick="removePhoto()">Remove</button>
+                        </div>
+                    </div>
+                    <input type="file" id="photo-input" name="profile_photo" accept="image/*" style="display: none;">
+                </div>
+
+                <!-- Personal Information -->
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <div class="form-floating">
+                            <input type="text" name="name" id="name" class="form-control" placeholder="Full Name" required minlength="3">
+                            <label for="name">Full Name *</label>
+                            <div class="invalid-feedback">Name is required (minimum 3 characters).</div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-floating">
+                            <input type="email" name="email" id="email" class="form-control" placeholder="Email" required>
+                            <label for="email">Email Address *</label>
+                            <div class="invalid-feedback">A valid email is required.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <div class="form-floating">
+                            <input type="number" name="age" id="age" class="form-control" placeholder="Age" min="10" max="100" required>
+                            <label for="age">Age *</label>
+                            <div class="invalid-feedback">Age must be between 10 and 100.</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="form-floating">
+                            <input type="tel" name="phone" id="phone" class="form-control" placeholder="Phone">
+                            <label for="phone">Phone Number</label>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="form-floating">
+                            <select name="status" id="status" class="form-select" required>
+                                <option value="active" selected>Active</option>
+                                <option value="inactive">Inactive</option>
+                                <option value="graduated">Graduated</option>
+                            </select>
+                            <label for="status">Status *</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-floating mb-4">
+                    <textarea name="address" id="address" class="form-control" placeholder="Address" style="height: 100px; resize: vertical;"></textarea>
+                    <label for="address">Address</label>
+                </div>
+
+                <!-- Submit Button -->
+                <button type="submit" class="btn btn-primary btn-lg w-100 shadow-sm" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; padding: 15px;">
+                    <span id="submit-text" style="font-size: 1.1rem;">🚀 Create Student Profile</span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Statistics -->
+    <div style="margin-top: 48px; text-align: center;">
+        <div class="card shadow-lg border-0" style="display: inline-block; min-width: 250px; border-radius: 15px; padding: 24px; background: white;">
+            <div style="font-size: 3rem; font-weight: 800; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px;" id="student-count">0</div>
+            <div style="font-weight: 600; text-transform: uppercase; color: #6c757d;">Students Registered</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let API_URL = '/api/students.php';
+        let CONFIG_LOADED = false;
+        
+        fetch('/api/config.php')
+            .then(response => response.json())
+            .then(config => {
+                API_URL = config.studentsUrl;
+                CONFIG_LOADED = true;
+                fetchStudentCount();
+            })
+            .catch(error => {
+                console.error('Failed to load config:', error);
+                CONFIG_LOADED = true;
+                fetchStudentCount();
+            });
+        
+        // Drag and drop
+        const dropArea = document.getElementById('drop-area');
+        const photoInput = document.getElementById('photo-input');
+        const dropContent = document.getElementById('drop-content');
+        const previewContainer = document.getElementById('preview-container');
+        const photoPreview = document.getElementById('photo-preview');
+        const fileName = document.getElementById('file-name');
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, () => {
+                dropArea.style.borderColor = '#764ba2';
+                dropArea.style.background = 'rgba(102, 126, 234, 0.05)';
+            });
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, () => {
+                dropArea.style.borderColor = '#667eea';
+                dropArea.style.background = 'transparent';
+            });
+        });
+
+        dropArea.addEventListener('drop', handleDrop);
+        dropArea.addEventListener('click', () => photoInput.click());
+
+        function handleDrop(e) {
+            handleFiles(e.dataTransfer.files);
+        }
+
+        photoInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.type.startsWith('image/')) {
+                    if (file.size > 5242880) {
+                        showMessage('File size must be less than 5MB', 'danger');
+                        return;
+                    }
+                    displayPreview(file);
+                } else {
+                    showMessage('Please select a valid image file', 'danger');
+                }
+            }
+        }
+
+        function displayPreview(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                photoPreview.src = e.target.result;
+                fileName.textContent = file.name;
+                dropContent.style.display = 'none';
+                previewContainer.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function removePhoto() {
+            photoInput.value = '';
+            dropContent.style.display = 'block';
+            previewContainer.style.display = 'none';
+        }
+
+        document.getElementById('student-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!e.target.checkValidity()) {
+                e.target.classList.add('was-validated');
+                return;
+            }
+            
+            if (!CONFIG_LOADED) {
+                showMessage('Please wait for configuration to load...', 'warning');
+                return;
+            }
+            
+            const submitText = document.getElementById('submit-text');
+            const originalText = submitText.textContent;
+            submitText.textContent = '⚡ Creating Profile...';
+            
+            const formData = new FormData(e.target);
+            
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    credentials: 'include',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.status === 'inserted') {
+                    showMessage('Student profile created successfully! 🎉', 'success');
+                    e.target.reset();
+                    e.target.classList.remove('was-validated');
+                    removePhoto();
+                    fetchStudentCount();
+                    
+                    // Redirect to view page after 2 seconds
+                    setTimeout(() => {
+                        window.location.href = 'view.php';
+                    }, 2000);
+                } else {
+                    showMessage(data.message || 'Failed to create profile', 'danger');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                showMessage('Network error. Please try again.', 'danger');
+            } finally {
+                submitText.textContent = originalText;
+            }
+        });
+
+        function showMessage(text, type) {
+            const container = document.getElementById('message-container');
+            const message = document.getElementById('message');
+            
+            message.textContent = text;
+            message.className = `alert alert-${type}`;
+            container.style.display = 'block';
+            
+            setTimeout(() => {
+                container.style.display = 'none';
+            }, 5000);
+        }
+
+        async function fetchStudentCount() {
+            if (!CONFIG_LOADED) return;
+            
+            try {
+                const response = await fetch(API_URL, {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                if (response.ok && data.status === 'success') {
+                    document.getElementById('student-count').textContent = data.pagination.total;
+                }
+            } catch (error) {
+                console.error('Failed to fetch student count:', error);
+            }
+        }
+
+        // Form validation
+        (function () {
+            'use strict'
+            const forms = document.querySelectorAll('.needs-validation')
+            Array.from(forms).forEach(form => {
+                form.addEventListener('submit', event => {
+                    if (!form.checkValidity()) {
+                        event.preventDefault()
+                        event.stopPropagation()
+                    }
+                    form.classList.add('was-validated')
+                }, false)
+            })
+        })()
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('name').focus();
+        });
+    </script>
+</body>
+</html>
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\src\auth_check.php ===
+<?php
+session_start();
+
+// Check if user is authenticated
+if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
+    header('Location: login.php');
+    exit();
+}
+
+// Check session timeout (30 minutes)
+$timeout_duration = 1800;
+if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeout_duration) {
+    session_unset();
+    session_destroy();
+    header('Location: login.php?timeout=1');
+    exit();
+}
+
+$_SESSION['last_activity'] = time();
+?>
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\src\edit.php ===
+<?php
+session_start();
+
+// Check authentication
+if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
+    header('Location: login.php');
+    exit;
+}
+
+$id = $_GET['id'] ?? null;
+if (!$id) {
+    header("Location: view.php");
+    exit;
+}
+?>
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <title id="pageTitle">Edit Student - Loading...</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="images/icon.png">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css" rel="stylesheet">
+    <style>
+        [data-bs-theme="dark"] {
+            --bs-body-bg: #1a1a1a;
+            --bs-body-color: #ffffff;
+        }
+        
+        [data-bs-theme="dark"] .card, [data-bs-theme="dark"] .info-card {
+            background: #2d2d2d !important;
+            color: #ffffff;
+            border-color: #404040;
+        }
+        
+        [data-bs-theme="dark"] .top-nav {
+            background: #2d2d2d !important;
+        }
+        
+        body {
+            background: #f5f7fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .top-nav {
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 15px 0;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        
+        .nav-brand {
+            font-size: 1.8rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .edit-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        
+        .edit-title {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+        
+        .student-id-badge {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+            border-radius: 25px;
+            color: #667eea;
+            font-weight: 600;
+            font-size: 1rem;
+            margin-top: 0.5rem;
+            border: 2px solid #667eea;
+        }
+        
+        .form-card {
+            background: white;
+            border-radius: 20px;
+            padding: 2.5rem;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            border: none;
+        }
+        
+        .info-card {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+            border: 1px solid rgba(102, 126, 234, 0.2);
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .form-floating {
+            margin-bottom: 1.5rem;
+        }
+        
+        .form-control, .form-select {
+            border-radius: 12px;
+            border: 2px solid #e9ecef;
+            padding: 1rem;
+            transition: all 0.3s;
+        }
+        
+        .form-control:focus, .form-select:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        
+        .btn {
+            border-radius: 12px;
+            padding: 0.75rem 1.5rem;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .edit-title {
+                font-size: 2rem;
+            }
+            
+            .form-card {
+                padding: 1.5rem;
+            }
+            
+            .nav-brand {
+                font-size: 1.2rem;
+            }
+        }
+        
+        #loading-state {
+            text-align: center;
+            padding: 5rem 0;
+        }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="container-fluid px-4">
+            <div class="d-flex justify-content-between align-items-center flex-wrap">
+                <div class="nav-brand">
+                    <i class="bi bi-mortarboard-fill"></i> STUDENT HUB
+                </div>
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <button id="theme-toggle" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-sun-fill"></i>
+                    </button>
+                    <span class="text-muted d-none d-md-inline">
+                        <i class="bi bi-person-circle"></i> <?php echo htmlspecialchars($_SESSION['username'] ?? 'Admin'); ?>
+                    </span>
+                    <a href="view.php" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-arrow-left"></i> <span class="d-none d-md-inline">Back to Dashboard</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-5">
+        <div class="edit-header">
+            <h1 class="edit-title">✏️ Edit Student Record</h1>
+            <p class="text-muted" style="font-size: 1.1rem;">Update student information</p>
+            <div class="student-id-badge">
+                🆔 Student ID: <span id="student-id-display"><?= htmlspecialchars($id); ?></span>
+            </div>
+        </div>
+
+        <div class="row justify-content-center">
+            <div class="col-lg-8 col-md-10">
+                <div id="loading-state">
+                    <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;"></div>
+                    <p class="text-muted mt-3">Fetching student data...</p>
+                </div>
+
+                <div id="content-container" style="display: none;">
+                    <div class="info-card">
+                        <div class="d-flex align-items-center">
+                            <div style="font-size: 2.5rem; margin-right: 1rem;">ℹ️</div>
+                            <div>
+                                <strong style="color: #667eea; font-size: 1.1rem;">Current Student:</strong>
+                                <p class="mb-0 text-muted" style="font-size: 1rem;">
+                                    <span id="current-name-display"></span> • <span id="current-email-display"></span>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Photo Upload Section -->
+                    <div class="card border-0 mb-4" style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%); border-radius: 15px;">
+                        <div class="card-body p-4">
+                            <h5 class="mb-3"><i class="bi bi-camera"></i> Profile Photo</h5>
+                            <div class="row align-items-center">
+                                <div class="col-md-4 text-center">
+                                    <div id="current-photo-container">
+                                        <div id="photo-preview" style="width: 120px; height: 120px; margin: 0 auto; border-radius: 50%; border: 3px solid #667eea; display: flex; align-items: center; justify-content: center; background: #f8f9fa; overflow: hidden;">
+                                            <span id="photo-placeholder" style="font-size: 3rem; color: #667eea;">📷</span>
+                                            <img id="photo-img" style="width: 100%; height: 100%; object-fit: cover; display: none;">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-8">
+                                    <div class="mb-3">
+                                        <input type="file" class="form-control" id="photo-input" accept="image/*" style="border-radius: 10px;">
+                                        <div class="form-text">Choose a new photo (JPG, PNG, GIF - Max 5MB)</div>
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <button type="button" id="upload-photo-btn" class="btn btn-outline-primary btn-sm" disabled>
+                                            <i class="bi bi-upload"></i> Upload Photo
+                                        </button>
+                                        <button type="button" id="remove-photo-btn" class="btn btn-outline-danger btn-sm" style="display: none;">
+                                            <i class="bi bi-trash"></i> Remove Photo
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card form-card border-0">
+                        <div class="card-body">
+                            <div id="update-error-alert" class="alert alert-danger alert-dismissible fade show" role="alert" style="display:none;">
+                                <strong>⚠️ Update Failed!</strong> <span id="update-error-message"></span>
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+
+                            <form autocomplete="off" class="needs-validation" novalidate id="editForm">
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <div class="form-floating">
+                                            <input type="text" name="name" class="form-control" id="nameInput" 
+                                                placeholder="Full Name" required minlength="3">
+                                            <label for="nameInput">👤 Full Name</label>
+                                            <div class="invalid-feedback">Name is required (minimum 3 characters).</div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-md-6">
+                                        <div class="form-floating">
+                                            <input type="email" name="email" class="form-control" id="emailInput" 
+                                                placeholder="Email Address" required>
+                                            <label for="emailInput">📧 Email Address</label>
+                                            <div class="invalid-feedback">A valid email address is required.</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <div class="form-floating">
+                                            <input type="number" name="age" class="form-control" id="ageInput" 
+                                                placeholder="Age" required min="10" max="100">
+                                            <label for="ageInput">🎂 Age</label>
+                                            <div class="invalid-feedback">Age must be between 10 and 100.</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <div class="form-floating">
+                                            <input type="tel" name="phone" class="form-control" id="phoneInput" 
+                                                placeholder="Phone">
+                                            <label for="phoneInput">📱 Phone Number</label>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <div class="form-floating">
+                                            <select name="status" class="form-select" id="statusInput" required>
+                                                <option value="active">Active</option>
+                                                <option value="inactive">Inactive</option>
+                                                <option value="graduated">Graduated</option>
+                                            </select>
+                                            <label for="statusInput">📊 Status</label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="form-floating">
+                                    <textarea name="address" class="form-control" id="addressInput" 
+                                        placeholder="Address" style="height: 120px;"></textarea>
+                                    <label for="addressInput">🏠 Address</label>
+                                </div>
+                                
+                                <div class="d-grid gap-3 mt-4">
+                                    <button type="submit" id="save-btn" class="btn btn-primary btn-lg">
+                                        <i class="bi bi-check-circle"></i> Save Changes
+                                    </button>
+                                    
+                                    <div class="row g-2">
+                                        <div class="col-md-6">
+                                            <button type="button" class="btn btn-outline-secondary w-100" onclick="resetToOriginal()">
+                                                <i class="bi bi-arrow-clockwise"></i> Reset to Original
+                                            </button>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <button type="button" class="btn btn-outline-danger w-100"
+                                               onclick="handleDeleteOnEditPage(<?= htmlspecialchars($id); ?>, document.getElementById('nameInput').value)">
+                                                <i class="bi bi-trash"></i> Delete Student
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
+    <script>
+        const notyf = new Notyf({
+            duration: 4000,
+            position: { x: 'right', y: 'top' },
+            dismissible: true
+        });
+
+        let API_URL = '/api/students.php';
+        let CONFIG_LOADED = false;
+        const STUDENT_ID = <?= json_encode(htmlspecialchars($id)); ?>;
+
+        fetch('/api/config.php')
+            .then(response => response.json())
+            .then(config => {
+                API_URL = config.studentsUrl;
+                CONFIG_LOADED = true;
+                loadStudent();
+            })
+            .catch(error => {
+                CONFIG_LOADED = true;
+                loadStudent();
+            });
+
+        let originalValues = {};
+        let currentPhotoPath = null;
+
+        const nameInput = document.getElementById('nameInput');
+        const emailInput = document.getElementById('emailInput');
+        const ageInput = document.getElementById('ageInput');
+        const phoneInput = document.getElementById('phoneInput');
+        const addressInput = document.getElementById('addressInput');
+        const statusInput = document.getElementById('statusInput');
+        const editForm = document.getElementById('editForm');
+        const saveBtn = document.getElementById('save-btn');
+        const updateErrorAlert = document.getElementById('update-error-alert');
+        const updateErrorMessage = document.getElementById('update-error-message');
+        const loadingState = document.getElementById('loading-state');
+        const contentContainer = document.getElementById('content-container');
+        const pageTitle = document.getElementById('pageTitle');
+        const currentNameDisplay = document.getElementById('current-name-display');
+        const currentEmailDisplay = document.getElementById('current-email-display');
+        
+        // Photo elements
+        const photoInput = document.getElementById('photo-input');
+        const photoPreview = document.getElementById('photo-preview');
+        const photoImg = document.getElementById('photo-img');
+        const photoPlaceholder = document.getElementById('photo-placeholder');
+        const uploadPhotoBtn = document.getElementById('upload-photo-btn');
+        const removePhotoBtn = document.getElementById('remove-photo-btn');
+        
+        // Photo event listeners
+        photoInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                if (file.size > 5242880) {
+                    notyf.error('File size must be less than 5MB');
+                    photoInput.value = '';
+                    return;
+                }
+                
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    photoImg.src = e.target.result;
+                    photoImg.style.display = 'block';
+                    photoPlaceholder.style.display = 'none';
+                    uploadPhotoBtn.disabled = false;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        uploadPhotoBtn.addEventListener('click', async function() {
+            const file = photoInput.files[0];
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('profile_photo', file);
+            formData.append('student_id', STUDENT_ID);
+            
+            uploadPhotoBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading...';
+            uploadPhotoBtn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/upload-photo.php', {
+                    method: 'POST',
+                    credentials: 'include',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.status === 'success') {
+                    currentPhotoPath = data.photo_path;
+                    removePhotoBtn.style.display = 'inline-block';
+                    notyf.success('Photo uploaded successfully!');
+                } else {
+                    notyf.error(data.message || 'Photo upload failed');
+                }
+            } catch (error) {
+                notyf.error('Network error during photo upload');
+            } finally {
+                uploadPhotoBtn.innerHTML = '<i class="bi bi-upload"></i> Upload Photo';
+                uploadPhotoBtn.disabled = false;
+            }
+        });
+        
+        removePhotoBtn.addEventListener('click', async function() {
+            if (!confirm('Are you sure you want to remove the profile photo?')) return;
+            
+            removePhotoBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Removing...';
+            removePhotoBtn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/remove-photo.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ student_id: STUDENT_ID })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.status === 'success') {
+                    photoImg.style.display = 'none';
+                    photoPlaceholder.style.display = 'block';
+                    removePhotoBtn.style.display = 'none';
+                    currentPhotoPath = null;
+                    photoInput.value = '';
+                    notyf.success('Photo removed successfully!');
+                } else {
+                    notyf.error(data.message || 'Photo removal failed');
+                }
+            } catch (error) {
+                notyf.error('Network error during photo removal');
+            } finally {
+                removePhotoBtn.innerHTML = '<i class="bi bi-trash"></i> Remove Photo';
+                removePhotoBtn.disabled = false;
+            }
+        });
+
+        function showError(message) {
+            updateErrorMessage.textContent = message;
+            updateErrorAlert.style.display = 'block';
+        }
+
+        function hideError() {
+            updateErrorAlert.style.display = 'none';
+        }
+        
+        function resetToOriginal() {
+            nameInput.value = originalValues.Name;
+            emailInput.value = originalValues.Email;
+            ageInput.value = originalValues.Age;
+            phoneInput.value = originalValues.phone || '';
+            addressInput.value = originalValues.address || '';
+            statusInput.value = originalValues.status || 'active';
+            editForm.classList.remove('was-validated');
+            hideError(); 
+        }
+
+        async function loadStudent() {
+            if (!CONFIG_LOADED) {
+                setTimeout(loadStudent, 100);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}?id=${STUDENT_ID}`, {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+
+                if (response.ok && data.status === 'success') {
+                    const student = data.data;
+                    
+                    originalValues = {
+                        Name: student.Name,
+                        Email: student.Email,
+                        Age: student.Age,
+                        phone: student.phone,
+                        address: student.address,
+                        status: student.status
+                    };
+
+                    nameInput.value = student.Name;
+                    emailInput.value = student.Email;
+                    ageInput.value = student.Age;
+                    phoneInput.value = student.phone || '';
+                    addressInput.value = student.address || '';
+                    statusInput.value = student.status || 'active';
+
+                    pageTitle.textContent = `Edit Student - ${student.Name}`;
+                    currentNameDisplay.textContent = student.Name;
+                    currentEmailDisplay.textContent = student.Email;
+                    
+                    // Handle photo display
+                    if (student.profile_photo) {
+                        currentPhotoPath = student.profile_photo;
+                        photoImg.src = `/${student.profile_photo}`;
+                        photoImg.style.display = 'block';
+                        photoPlaceholder.style.display = 'none';
+                        removePhotoBtn.style.display = 'inline-block';
+                    } else {
+                        photoImg.style.display = 'none';
+                        photoPlaceholder.style.display = 'block';
+                        removePhotoBtn.style.display = 'none';
+                    }
+
+                    loadingState.style.display = 'none';
+                    contentContainer.style.display = 'block';
+
+                } else if (response.status === 404) {
+                    notyf.error('Student not found');
+                    window.location.href = 'view.php';
+                } else {
+                    throw new Error(data.message || 'API error during fetch.');
+                }
+            } catch (error) {
+                notyf.error('Network error occurred');
+                window.location.href = 'view.php';
+            }
+        }
+
+        editForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            hideError();
+
+            if (!editForm.checkValidity()) {
+                editForm.classList.add('was-validated');
+                return;
+            }
+
+            const formData = new FormData(editForm);
+            const data = Object.fromEntries(formData);
+            data.id = parseInt(STUDENT_ID);
+            data.age = parseInt(data.age);
+
+            saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+            saveBtn.disabled = true;
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify(data)
+                });
+                const responseData = await response.json();
+
+                if (response.ok && responseData.status === 'updated') {
+                    notyf.success('Student updated successfully!');
+                    setTimeout(() => {
+                        window.location.href = 'view.php';
+                    }, 1000);
+                } else {
+                    const message = responseData.message || 'An unknown error occurred on the server.';
+                    showError(message);
+                }
+            } catch (error) {
+                showError('A network error prevented the update. Check server status.');
+            } finally {
+                saveBtn.innerHTML = '<i class="bi bi-check-circle"></i> Save Changes';
+                saveBtn.disabled = false;
+            }
+        });
+
+        function handleDeleteOnEditPage(id, name) {
+            if (confirm(`⚠️ Are you sure you want to delete this record?\n\nStudent: ${name}\nThis action cannot be undone.`)) {
+                fetch(API_URL, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ id: id })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'deleted') {
+                        notyf.success('Student deleted successfully!');
+                        setTimeout(() => {
+                            window.location.href = 'view.php';
+                        }, 1000);
+                    } else {
+                        notyf.error(`Deletion failed: ${data.message || 'Unknown error.'}`);
+                    }
+                })
+                .catch(error => notyf.error('Network error during deletion.'));
+            }
+        }
+
+        const themeToggle = document.getElementById('theme-toggle');
+        const html = document.documentElement;
+        const currentTheme = localStorage.getItem('theme') || 'light';
+        
+        html.setAttribute('data-bs-theme', currentTheme);
+        updateThemeIcon(currentTheme);
+        
+        themeToggle.addEventListener('click', () => {
+            const theme = html.getAttribute('data-bs-theme') === 'light' ? 'dark' : 'light';
+            html.setAttribute('data-bs-theme', theme);
+            localStorage.setItem('theme', theme);
+            updateThemeIcon(theme);
+            notyf.success(`Switched to ${theme} mode`);
+        });
+        
+        function updateThemeIcon(theme) {
+            const icon = themeToggle.querySelector('i');
+            icon.className = theme === 'light' ? 'bi bi-moon-fill' : 'bi bi-sun-fill';
+        }
+        
+        (function () {
+          'use strict'
+          const forms = document.querySelectorAll('.needs-validation')
+          Array.from(forms).forEach(form => {
+            form.addEventListener('submit', event => {
+              if (!form.checkValidity()) {
+                event.preventDefault()
+                event.stopPropagation()
+              }
+              form.classList.add('was-validated')
+            }, false)
+          })
+        })()
+    </script>
+</body>
+</html>
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\src\favicon.ico ===
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4f46e5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#6366f1;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#grad)"/>
+  <text x="16" y="22" font-family="Arial, sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="white">S</text>
+</svg>
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\src\index.php ===
+<?php
+// Landing page - redirects to login if not authenticated
+session_start();
+
+// Check if user is authenticated
+if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
+    header('Location: login.php');
+    exit;
+}
+
+// If authenticated, redirect to dashboard
+header('Location: view.php');
+exit;
+?>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Add Student - Neo Hub</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="favicon.ico">
+    <link href="style.css" rel="stylesheet">
+</head>
+<body style="padding: 24px;">
+    
+    <!-- Header -->
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">ADD STUDENT</h1>
+            <p class="page-subtitle">Create a new student profile</p>
+        </div>
+        <div style="display: flex; gap: 16px;">
+            <?php if ($isAuthenticated): ?>
+                <a href="view.php" class="btn-brutal blue">← BACK TO DASHBOARD</a>
+            <?php else: ?>
+                <a href="login.php" class="btn-brutal">LOGIN</a>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- Success/Error Messages -->
+    <div id="message-container" style="display: none; margin-bottom: 24px;">
+        <div id="message" class="message success"></div>
+    </div>
+
+    <!-- Add Student Form -->
+    <div class="brutal-card" style="padding: 40px; max-width: 800px; margin: 0 auto;">
+        <form id="student-form" enctype="multipart/form-data">
+            
+            <!-- Profile Photo Upload -->
+            <div style="margin-bottom: 32px;">
+                <label class="form-label">Profile Photo</label>
+                <div class="drag-drop-area" id="drop-area">
+                    <div id="drop-content">
+                        <div style="font-size: 3rem; margin-bottom: 16px;">📸</div>
+                        <p style="margin: 0 0 8px 0; font-family: var(--font-display); font-size: 1.2rem;">DRAG & DROP YOUR PHOTO</p>
+                        <p style="margin: 0 0 16px 0; font-family: var(--font-mono); font-size: 0.9rem;">or click to browse files</p>
+                        <button type="button" class="btn-brutal" onclick="document.getElementById('photo-input').click()">CHOOSE FILE</button>
+                    </div>
+                    <div id="preview-container" style="display: none;">
+                        <img id="photo-preview" style="max-width: 200px; max-height: 200px; border: 3px solid var(--ink-black); object-fit: cover;">
+                        <p id="file-name" style="margin: 12px 0 0 0; font-family: var(--font-mono); font-weight: 500;"></p>
+                        <button type="button" class="btn-brutal danger" style="margin-top: 12px;" onclick="removePhoto()">REMOVE</button>
+                    </div>
+                </div>
+                <input type="file" id="photo-input" name="profile_photo" accept="image/*" style="display: none;">
+            </div>
+
+            <!-- Personal Information -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+                <div class="form-group">
+                    <label class="form-label">Full Name *</label>
+                    <input type="text" name="name" id="name" class="brutal-input" placeholder="Enter full name" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Email Address *</label>
+                    <input type="email" name="email" id="email" class="brutal-input" placeholder="Enter email address" required>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+                <div class="form-group">
+                    <label class="form-label">Age *</label>
+                    <input type="number" name="age" id="age" class="brutal-input" placeholder="Enter age" min="10" max="100" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Phone Number</label>
+                    <input type="tel" name="phone" id="phone" class="brutal-input" placeholder="Enter phone number">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Status *</label>
+                    <select name="status" id="status" class="brutal-input" required>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                        <option value="graduated">Graduated</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 32px;">
+                <label class="form-label">Address</label>
+                <textarea name="address" id="address" class="brutal-input" rows="3" placeholder="Enter address" style="resize: vertical; min-height: 80px;"></textarea>
+            </div>
+
+            <!-- Submit Button -->
+            <button type="submit" class="btn-brutal" style="width: 100%; font-size: 1.2rem; padding: 18px;">
+                <span id="submit-text">🚀 CREATE STUDENT PROFILE</span>
+            </button>
+        </form>
+    </div>
+
+    <!-- Statistics -->
+    <div style="margin-top: 48px; text-align: center;">
+        <div class="brutal-card" style="padding: 24px; display: inline-block; min-width: 200px;">
+            <div style="font-family: var(--font-display); font-size: 2.5rem; color: var(--ink-black); margin-bottom: 8px; text-shadow: 2px 2px 0px var(--pop-pink);" id="student-count">0</div>
+            <div style="font-family: var(--font-mono); font-weight: 700; text-transform: uppercase;">Students Registered</div>
+        </div>
+    </div>
+
+    <script>
+        // Get API URL from config endpoint
+        let API_URL = '/api/students.php';
+        let CONFIG_LOADED = false;
+        
+        // Load configuration
+        fetch('/api/config.php')
+            .then(response => response.json())
+            .then(config => {
+                API_URL = config.studentsUrl;
+                CONFIG_LOADED = true;
+                console.log('API URL configured:', API_URL);
+                fetchStudentCount();
+            })
+            .catch(error => {
+                console.error('Failed to load config, using default:', error);
+                CONFIG_LOADED = true;
+                fetchStudentCount();
+            });
+        
+        // Drag and drop functionality
+        const dropArea = document.getElementById('drop-area');
+        const photoInput = document.getElementById('photo-input');
+        const dropContent = document.getElementById('drop-content');
+        const previewContainer = document.getElementById('preview-container');
+        const photoPreview = document.getElementById('photo-preview');
+        const fileName = document.getElementById('file-name');
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, () => dropArea.classList.add('dragover'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, () => dropArea.classList.remove('dragover'), false);
+        });
+
+        dropArea.addEventListener('drop', handleDrop, false);
+        dropArea.addEventListener('click', () => photoInput.click());
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+
+        photoInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.type.startsWith('image/')) {
+                    if (file.size > 5242880) { // 5MB limit
+                        showMessage('File size must be less than 5MB', 'error');
+                        return;
+                    }
+                    displayPreview(file);
+                } else {
+                    showMessage('Please select a valid image file', 'error');
+                }
+            }
+        }
+
+        function displayPreview(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                photoPreview.src = e.target.result;
+                fileName.textContent = file.name;
+                dropContent.style.display = 'none';
+                previewContainer.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function removePhoto() {
+            photoInput.value = '';
+            dropContent.style.display = 'block';
+            previewContainer.style.display = 'none';
+        }
+
+        // Form submission
+        document.getElementById('student-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!CONFIG_LOADED) {
+                showMessage('Please wait for configuration to load...', 'error');
+                return;
+            }
+            
+            const submitText = document.getElementById('submit-text');
+            const originalText = submitText.textContent;
+            submitText.textContent = '⚡ CREATING PROFILE...';
+            
+            const formData = new FormData(e.target);
+            
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.status === 'inserted') {
+                    showMessage('Student profile created successfully! 🎉', 'success');
+                    e.target.reset();
+                    removePhoto();
+                    fetchStudentCount();
+                } else {
+                    showMessage(data.message || 'Failed to create profile', 'error');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                showMessage('Network error. Please try again.', 'error');
+            } finally {
+                submitText.textContent = originalText;
+            }
+        });
+
+        function showMessage(text, type) {
+            const container = document.getElementById('message-container');
+            const message = document.getElementById('message');
+            
+            message.textContent = text;
+            message.className = `message ${type}`;
+            container.style.display = 'block';
+            
+            setTimeout(() => {
+                container.style.display = 'none';
+            }, 5000);
+        }
+
+        async function fetchStudentCount() {
+            if (!CONFIG_LOADED) return;
+            
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json();
+                if (response.ok && data.status === 'success') {
+                    document.getElementById('student-count').textContent = data.pagination.total;
+                }
+            } catch (error) {
+                console.error('Failed to fetch student count:', error);
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('name').focus();
+        });
+    </script>
+</body>
+</html>
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\src\login.php ===
+<?php
+session_start();
+
+// If already logged in, redirect to view page
+if (isset($_SESSION['authenticated']) && $_SESSION['authenticated'] === true) {
+    header('Location: view.php');
+    exit();
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - Student Hub</title>
+    <link rel="icon" type="image/png" href="images/icon.png">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial Black', 'Arial Bold', Gadget, sans-serif;
+            background-image: url('images/background-image.png');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            background-repeat: no-repeat;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: white;
+            border: 4px solid #000;
+            box-shadow: 12px 12px 0px #000;
+            padding: 40px;
+            max-width: 450px;
+            width: 100%;
+            position: relative;
+        }
+
+        .logo-section {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            font-size: 32px;
+            color: #000;
+            margin-bottom: 10px;
+            font-family: 'Cooper Black', 'Arial Black', sans-serif;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+            font-weight: normal;
+        }
+
+        .error-message {
+            background: #FF90E8;
+            border: 3px solid #000;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: none;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #000;
+        }
+
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 15px;
+            border: 3px solid #000;
+            font-size: 16px;
+            font-family: 'Courier New', monospace;
+            background: #fff;
+            transition: all 0.2s;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            box-shadow: 6px 6px 0px #FFC900;
+            transform: translate(-3px, -3px);
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 18px;
+            background: #FFC900;
+            border: 4px solid #000;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Arial Black', sans-serif;
+            text-transform: uppercase;
+        }
+
+        .btn-login:hover {
+            box-shadow: 8px 8px 0px #000;
+            transform: translate(-4px, -4px);
+        }
+
+        .btn-login:active {
+            box-shadow: 4px 4px 0px #000;
+            transform: translate(-2px, -2px);
+        }
+
+        .btn-login:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        .admin-help {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 3px dashed #000;
+            text-align: center;
+        }
+
+        .help-title {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .cli-command {
+            background: #000;
+            color: #00ff00;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            border: 3px solid #000;
+            text-align: left;
+            overflow-x: auto;
+        }
+
+        .security-badge {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: #FF90E8;
+            border: 2px solid #000;
+            padding: 5px 10px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        @media (max-width: 500px) {
+            .login-container {
+                padding: 30px 20px;
+                box-shadow: 8px 8px 0px #000;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            .logo {
+                font-size: 36px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo-section">
+            <div class="logo">🎓</div>
+            <h1>STUDENT HUB</h1>
+            <p class="subtitle">Admin Access Portal</p>
+        </div>
+
+        <div id="errorMessage" class="error-message">
+            <span id="errorText"></span>
+        </div>
+
+        <form id="loginForm" method="POST">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input 
+                    type="text" 
+                    id="username" 
+                    name="username" 
+                    placeholder="admin@admin.com"
+                    required
+                    autocomplete="username"
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input 
+                    type="password" 
+                    id="password" 
+                    name="password" 
+                    placeholder="••••••••"
+                    required
+                    autocomplete="current-password"
+                >
+            </div>
+
+            <button type="submit" class="btn-login" id="loginBtn">
+                LOGIN
+            </button>
+        </form>
+
+        <!-- <div class="admin-help">
+            <p class="help-title">ℹ️ Need an admin account?</p>
+            <div class="cli-command">
+                CLI: docker exec -it 3tier-backend php create_admin.php
+            </div>
+        </div> -->
+
+        <!-- <div class="security-badge">
+            🛡️ Secure Authentication System
+        </div> -->
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            
+            const loginBtn = document.getElementById('loginBtn');
+            const errorMessage = document.getElementById('errorMessage');
+            const errorText = document.getElementById('errorText');
+            
+            // Disable button and show loading
+            loginBtn.disabled = true;
+            loginBtn.textContent = '⚡ LOGGING IN...';
+            errorMessage.classList.remove('show');
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                const response = await fetch('/api/auth.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                console.log('Login response:', response.status, data);
+                
+                if (response.ok && data.status === 'success') {
+                    // Success - set session flag and redirect
+                    console.log('Login successful, redirecting...');
+                    
+                    // Make a request to set frontend session
+                    fetch('/set_session.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            username: data.user.username,
+                            user_id: data.user.id
+                        })
+                    }).then(() => {
+                        window.location.href = 'view.php';
+                    }).catch(() => {
+                        // Fallback - just redirect
+                        window.location.href = 'view.php';
+                    });
+                } else {
+                    // Show error message
+                    console.log('Login failed:', data);
+                    errorText.textContent = data.message || 'Login failed. Please try again.';
+                    errorMessage.classList.add('show');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                errorText.textContent = 'Network error. Please check your connection and try again.';
+                errorMessage.classList.add('show');
+            } finally {
+                // Re-enable button
+                loginBtn.disabled = false;
+                loginBtn.textContent = '➜ LOGIN';
+            }
+        });
+        
+        // Focus on username field when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('username').focus();
+        });
+    </script>
+
+</body>
+</html>
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\src\logout.php ===
+<?php
+session_start();
+session_unset();
+session_destroy();
+
+// Clear session cookie
+if (isset($_COOKIE[session_name()])) {
+    setcookie(session_name(), '', time() - 3600, '/');
+}
+
+// Handle both GET and POST requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    echo json_encode(['status' => 'success']);
+} else {
+    header('Location: login.php');
+}
+exit();
+?>
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\src\set_session.php ===
+<?php
+session_start();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if (isset($input['username'])) {
+        $_SESSION['authenticated'] = true;
+        $_SESSION['username'] = $input['username'];
+        $_SESSION['user_id'] = $input['user_id'] ?? null;
+        $_SESSION['last_activity'] = time();
+        
+        echo json_encode(['status' => 'success']);
+    } else {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Invalid data']);
+    }
+} else {
+    http_response_code(405);
+    echo json_encode(['status' => 'error', 'message' => 'Method not allowed']);
+}
+?>
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\src\style.css ===
+/* NEO-BRUTALIST POP DESIGN SYSTEM */
+
+@import url('https://fonts.googleapis.com/css2?family=Cooper+Black&family=JetBrains+Mono:wght@400;500;700&family=Fredoka:wght@400;500;600;700&display=swap');
+
+:root {
+  /* Neo-Brutalist Pop Color Palette */
+  --pop-pink: #FF90E8;
+  --sunshine-yellow: #FFC900;
+  --stark-white: #FFFFFF;
+  --ink-black: #000000;
+  --electric-blue: #00D4FF;
+  --lime-green: #CCFF00;
+  --hot-orange: #FF6B35;
+  
+  /* Shadows & Effects */
+  --brutal-shadow: 6px 6px 0px var(--ink-black);
+  --brutal-shadow-hover: 8px 8px 0px var(--ink-black);
+  --brutal-shadow-small: 3px 3px 0px var(--ink-black);
+  
+  /* Typography */
+  --font-display: 'Cooper Black', 'Fredoka', serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-body: 'Fredoka', sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--pop-pink);
+  color: var(--ink-black);
+  min-height: 100vh;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* WAVY DIVIDER COMPONENT */
+.wavy-divider {
+  width: 100%;
+  height: 40px;
+  background: var(--sunshine-yellow);
+  position: relative;
+  overflow: hidden;
+}
+
+.wavy-divider::before {
+  content: '';
+  position: absolute;
+  top: -20px;
+  left: 0;
+  width: 100%;
+  height: 40px;
+  background: var(--pop-pink);
+  border-radius: 0 0 50% 50% / 0 0 100% 100%;
+}
+
+.wavy-divider.reverse::before {
+  top: 20px;
+  border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+}
+
+/* BRUTALIST CARDS */
+.brutal-card {
+  background: var(--stark-white);
+  border: 3px solid var(--ink-black);
+  box-shadow: var(--brutal-shadow);
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.brutal-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--brutal-shadow-hover);
+}
+
+/* BUTTONS */
+.btn-brutal {
+  background: var(--sunshine-yellow);
+  border: 3px solid var(--ink-black);
+  box-shadow: var(--brutal-shadow-small);
+  padding: 12px 24px;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--ink-black);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-decoration: none;
+  display: inline-block;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.btn-brutal:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 5px 5px 0px var(--ink-black);
+}
+
+.btn-brutal:active {
+  transform: translate(1px, 1px);
+  box-shadow: 2px 2px 0px var(--ink-black);
+}
+
+.btn-brutal.pink {
+  background: var(--pop-pink);
+}
+
+.btn-brutal.blue {
+  background: var(--electric-blue);
+}
+
+.btn-brutal.danger {
+  background: var(--hot-orange);
+  color: var(--stark-white);
+}
+
+/* FORM INPUTS */
+.brutal-input {
+  width: 100%;
+  padding: 16px 20px;
+  background: var(--stark-white);
+  border: 3px solid var(--ink-black);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ink-black);
+  transition: all 0.15s ease;
+}
+
+.brutal-input:focus {
+  outline: none;
+  transform: translate(-2px, -2px);
+  box-shadow: var(--brutal-shadow-small);
+}
+
+.brutal-input::placeholder {
+  color: #666;
+  font-family: var(--font-body);
+}
+
+/* LOGIN PAGE */
+.login-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: linear-gradient(45deg, var(--pop-pink) 0%, var(--sunshine-yellow) 100%);
+}
+
+.login-card {
+  background: var(--stark-white);
+  border: 4px solid var(--ink-black);
+  box-shadow: 12px 12px 0px var(--ink-black);
+  padding: 48px;
+  width: 100%;
+  max-width: 420px;
+  position: relative;
+}
+
+.login-card::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -8px;
+  background: var(--electric-blue);
+  z-index: -1;
+}
+
+.logo {
+  font-family: var(--font-display);
+  font-size: 3rem;
+  text-align: center;
+  margin-bottom: 32px;
+  color: var(--ink-black);
+  text-transform: uppercase;
+  letter-spacing: -2px;
+  text-shadow: 3px 3px 0px var(--pop-pink);
+}
+
+/* STUDENT CARDS - TRADING CARD STYLE */
+.student-card {
+  background: var(--stark-white);
+  border: 4px solid var(--ink-black);
+  box-shadow: var(--brutal-shadow);
+  padding: 24px;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.student-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background: linear-gradient(90deg, var(--pop-pink), var(--sunshine-yellow), var(--electric-blue));
+}
+
+.student-card:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: 9px 9px 0px var(--ink-black);
+}
+
+.student-avatar {
+  width: 80px;
+  height: 80px;
+  border: 3px solid var(--ink-black);
+  object-fit: cover;
+  box-shadow: var(--brutal-shadow-small);
+}
+
+.student-avatar.default {
+  background: var(--sunshine-yellow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  color: var(--ink-black);
+}
+
+/* STATUS BADGES */
+.status-badge {
+  padding: 8px 16px;
+  border: 2px solid var(--ink-black);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  display: inline-block;
+}
+
+.status-active {
+  background: var(--lime-green);
+  color: var(--ink-black);
+}
+
+.status-inactive {
+  background: var(--hot-orange);
+  color: var(--stark-white);
+}
+
+.status-graduated {
+  background: var(--electric-blue);
+  color: var(--ink-black);
+}
+
+/* STATS ZONE */
+.stats-zone {
+  background: var(--sunshine-yellow);
+  border: 4px solid var(--ink-black);
+  padding: 32px;
+  margin-bottom: 32px;
+  position: relative;
+}
+
+.stats-zone::after {
+  content: '';
+  position: absolute;
+  bottom: -20px;
+  left: 0;
+  width: 100%;
+  height: 20px;
+  background: var(--sunshine-yellow);
+  clip-path: polygon(0 0, 100% 0, 95% 100%, 5% 100%);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 24px;
+}
+
+.stat-card {
+  background: var(--stark-white);
+  border: 3px solid var(--ink-black);
+  padding: 24px;
+  text-align: center;
+  box-shadow: var(--brutal-shadow-small);
+}
+
+.stat-number {
+  font-family: var(--font-display);
+  font-size: 3rem;
+  color: var(--ink-black);
+  margin-bottom: 8px;
+  text-shadow: 2px 2px 0px var(--pop-pink);
+}
+
+.stat-label {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 14px;
+}
+
+/* GRID LAYOUTS */
+.grid-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 24px;
+  padding: 24px 0;
+}
+
+/* SEARCH BAR */
+.search-container {
+  background: var(--stark-white);
+  border: 3px solid var(--ink-black);
+  padding: 24px;
+  margin-bottom: 32px;
+  box-shadow: var(--brutal-shadow);
+}
+
+.search-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr auto;
+  gap: 16px;
+  align-items: center;
+}
+
+/* DRAG & DROP */
+.drag-drop-area {
+  border: 3px dashed var(--ink-black);
+  background: var(--stark-white);
+  padding: 48px 24px;
+  text-align: center;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.drag-drop-area:hover,
+.drag-drop-area.dragover {
+  background: var(--sunshine-yellow);
+  transform: translate(-2px, -2px);
+  box-shadow: var(--brutal-shadow-small);
+}
+
+/* PAGINATION */
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 32px;
+}
+
+.page-btn {
+  padding: 12px 16px;
+  background: var(--stark-white);
+  border: 3px solid var(--ink-black);
+  color: var(--ink-black);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-decoration: none;
+}
+
+.page-btn:hover,
+.page-btn.active {
+  background: var(--sunshine-yellow);
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0px var(--ink-black);
+}
+
+/* FORM GROUPS */
+.form-group {
+  position: relative;
+  margin-bottom: 24px;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 14px;
+}
+
+/* MESSAGES */
+.message {
+  padding: 16px 24px;
+  border: 3px solid var(--ink-black);
+  margin-bottom: 24px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+.message.success {
+  background: var(--lime-green);
+}
+
+.message.error {
+  background: var(--hot-orange);
+  color: var(--stark-white);
+}
+
+/* HEADER STYLES */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 32px;
+  padding: 24px;
+  background: var(--stark-white);
+  border: 4px solid var(--ink-black);
+  box-shadow: var(--brutal-shadow);
+}
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: 2.5rem;
+  color: var(--ink-black);
+  text-transform: uppercase;
+  letter-spacing: -1px;
+  text-shadow: 2px 2px 0px var(--pop-pink);
+}
+
+.page-subtitle {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  margin-top: 8px;
+  color: #666;
+}
+
+/* RESPONSIVE */
+@media (max-width: 768px) {
+  .grid-container {
+    grid-template-columns: 1fr;
+  }
+  
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .search-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .login-card {
+    padding: 32px 24px;
+  }
+  
+  .page-header {
+    flex-direction: column;
+    gap: 16px;
+    text-align: center;
+  }
+}
+
+/* ANIMATIONS */
+@keyframes bounce {
+  0%, 20%, 50%, 80%, 100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-10px);
+  }
+  60% {
+    transform: translateY(-5px);
+  }
+}
+
+.bounce {
+  animation: bounce 2s infinite;
+}
+
+/* LOADING SHIMMER */
+.shimmer {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\src\view.php ===
+<?php
+require_once 'auth_check.php';
+?>
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <title>Student Dashboard - Student Hub</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="images/icon.png">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <!-- Toast CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css" rel="stylesheet">
+    <style>
+        /* Dark/Light Mode & Mobile Responsiveness */
+        [data-bs-theme="dark"] {
+            --bs-body-bg: #1a1a1a;
+            --bs-body-color: #ffffff;
+        }
+        
+        [data-bs-theme="dark"] .stats-card,
+        [data-bs-theme="dark"] .student-card,
+        [data-bs-theme="dark"] .search-box {
+            background: #2d2d2d !important;
+            color: #ffffff;
+        }
+        
+        [data-bs-theme="dark"] .top-nav {
+            background: #2d2d2d !important;
+        }
+        
+        /* Loading Animations */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Bulk Actions */
+        .bulk-actions {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        [data-bs-theme="dark"] .bulk-actions {
+            background: #3d3d00;
+            border-color: #666600;
+        }
+        
+        .student-checkbox {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+        }
+        
+        /* Mobile Responsiveness */
+        @media (max-width: 768px) {
+            .stats-card {
+                margin-bottom: 15px;
+            }
+            
+            .search-box .row {
+                gap: 10px;
+            }
+            
+            .search-box .col-md-4,
+            .search-box .col-md-2 {
+                flex: 0 0 100%;
+                max-width: 100%;
+            }
+            
+            .student-card {
+                margin-bottom: 15px;
+            }
+            
+            .nav-brand {
+                font-size: 1.2rem;
+            }
+            
+            .top-nav .d-flex {
+                flex-direction: column;
+                gap: 10px;
+            }
+        }
+        
+        @media (max-width: 576px) {
+            .container-fluid {
+                padding: 10px;
+            }
+            
+            .stats-number {
+                font-size: 2rem;
+            }
+            
+            .student-card {
+                padding: 15px;
+            }
+        }
+        
+        .top-nav {
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 15px 0;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        
+        .nav-brand {
+            font-size: 1.8rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .stats-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+            transition: all 0.3s;
+            border: none;
+        }
+        
+        .stats-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+        }
+        
+        .stats-number {
+            font-size: 3rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+        }
+        
+        .stats-label {
+            font-size: 0.9rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 1px;
+        }
+        
+        .student-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            transition: all 0.3s;
+            border: none;
+            height: 100%;
+        }
+        
+        .student-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+        }
+        
+        .student-avatar {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid #f0f0f0;
+        }
+        
+        .student-avatar-default {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            font-weight: 700;
+            color: white;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .badge-status {
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .badge-active {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .badge-inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .badge-graduated {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .search-box {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            margin-bottom: 30px;
+        }
+        
+        .shimmer {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
+        
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        
+        .pagination {
+            margin-top: 30px;
+        }
+        
+        .page-link {
+            border-radius: 8px;
+            margin: 0 5px;
+            color: #667eea;
+            border: 2px solid #e9ecef;
+        }
+        
+        .page-link:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+        
+        .page-item.active .page-link {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    
+    <!-- Top Navigation -->
+    <nav class="top-nav">
+        <div class="container-fluid px-4">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="nav-brand">
+                    <i class="bi bi-mortarboard-fill"></i> STUDENT HUB
+                </div>
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <button id="theme-toggle" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-sun-fill"></i>
+                    </button>
+                    <span class="text-muted d-none d-md-inline">
+                        <i class="bi bi-person-circle"></i> <?php echo htmlspecialchars($_SESSION['username'] ?? 'Admin'); ?>
+                    </span>
+                    <a href="add-student.php" class="btn btn-primary shadow-sm btn-sm">
+                        <i class="bi bi-plus-circle"></i> <span class="d-none d-md-inline">Add Student</span>
+                    </a>
+                    <button id="logout-btn" class="btn btn-outline-danger btn-sm">
+                        <i class="bi bi-box-arrow-right"></i> <span class="d-none d-md-inline">Logout</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 py-4">
+        
+        <!-- Bulk Actions Bar -->
+        <div id="bulk-actions" class="bulk-actions">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span><strong id="selected-count">0</strong> students selected</span>
+                <div class="btn-group" role="group">
+                    <button id="select-all-btn" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-check-all"></i> Select All
+                    </button>
+                    <button id="deselect-all-btn" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-x-circle"></i> Deselect All
+                    </button>
+                    <button id="bulk-delete-btn" class="btn btn-outline-danger btn-sm">
+                        <i class="bi bi-trash"></i> Delete Selected
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="row g-4 mb-4">
+                <div class="col-md-3 col-sm-6">
+                    <div class="stats-card">
+                        <div class="stats-number text-primary" id="total-count">0</div>
+                        <div class="stats-label"><i class="bi bi-people-fill"></i> Total Students</div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="stats-card">
+                        <div class="stats-number text-success" id="active-count">0</div>
+                        <div class="stats-label"><i class="bi bi-check-circle-fill"></i> Active</div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="stats-card">
+                        <div class="stats-number text-warning" id="inactive-count">0</div>
+                        <div class="stats-label"><i class="bi bi-pause-circle-fill"></i> Inactive</div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="stats-card">
+                        <div class="stats-number text-info" id="graduated-count">0</div>
+                        <div class="stats-label"><i class="bi bi-mortarboard-fill"></i> Graduated</div>
+                    </div>
+                </div>
+        </div>
+
+        <!-- Search & Filters -->
+        <div class="search-box">
+            <div class="row g-3">
+                <div class="col-lg-4 col-md-6">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" id="search-input" class="form-control" placeholder="Search students...">
+                    </div>
+                </div>
+                <div class="col-lg-2 col-md-3 col-sm-6">
+                    <select id="status-filter" class="form-select">
+                        <option value="">All Status</option>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                        <option value="graduated">Graduated</option>
+                    </select>
+                </div>
+                <div class="col-lg-2 col-md-3 col-sm-6">
+                    <select id="sort-field" class="form-select">
+                        <option value="Name">Sort by Name</option>
+                        <option value="Age">Sort by Age</option>
+                        <option value="enrollment_date">Sort by Date</option>
+                    </select>
+                </div>
+                <div class="col-lg-2 col-md-6">
+                    <button id="reset-btn" class="btn btn-outline-secondary w-100">
+                        <i class="bi bi-arrow-clockwise"></i> <span class="d-none d-md-inline">Reset</span>
+                    </button>
+                </div>
+                <div class="col-lg-2 col-md-6">
+                    <button id="refresh-btn" class="btn btn-outline-primary w-100">
+                        <i class="bi bi-arrow-repeat"></i> <span class="d-none d-md-inline">Refresh</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Student Cards Grid -->
+        <div id="students-grid" class="row g-4">
+            <!-- Loading shimmer cards -->
+            <div class="col-md-4"><div class="student-card shimmer" style="height: 300px;"></div></div>
+            <div class="col-md-4"><div class="student-card shimmer" style="height: 300px;"></div></div>
+            <div class="col-md-4"><div class="student-card shimmer" style="height: 300px;"></div></div>
+        </div>
+
+        <!-- Pagination -->
+        <nav aria-label="Page navigation">
+            <ul class="pagination justify-content-center" id="pagination"></ul>
+        </nav>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Toast Library -->
+    <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
+    <script>
+        // Initialize toast notifications
+        const notyf = new Notyf({
+            duration: 4000,
+            position: { x: 'right', y: 'top' },
+            dismissible: true,
+            types: [
+                {
+                    type: 'success',
+                    background: '#28a745',
+                    icon: { className: 'bi bi-check-circle-fill', tagName: 'i' }
+                },
+                {
+                    type: 'error',
+                    background: '#dc3545',
+                    icon: { className: 'bi bi-x-circle-fill', tagName: 'i' }
+                }
+            ]
+        });
+        
+        // Loading overlay functions
+        function showLoading() {
+            const overlay = document.createElement('div');
+            overlay.id = 'loading-overlay';
+            overlay.className = 'loading-overlay';
+            overlay.innerHTML = '<div class="spinner"></div>';
+            document.body.appendChild(overlay);
+        }
+        
+        function hideLoading() {
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) overlay.remove();
+        }
+        
+        // Dark/Light mode toggle
+        const themeToggle = document.getElementById('theme-toggle');
+        const html = document.documentElement;
+        const currentTheme = localStorage.getItem('theme') || 'light';
+        
+        html.setAttribute('data-bs-theme', currentTheme);
+        updateThemeIcon(currentTheme);
+        
+        themeToggle.addEventListener('click', () => {
+            const theme = html.getAttribute('data-bs-theme') === 'light' ? 'dark' : 'light';
+            html.setAttribute('data-bs-theme', theme);
+            localStorage.setItem('theme', theme);
+            updateThemeIcon(theme);
+            notyf.success(`Switched to ${theme} mode`);
+        });
+        
+        function updateThemeIcon(theme) {
+            const icon = themeToggle.querySelector('i');
+            icon.className = theme === 'light' ? 'bi bi-moon-fill' : 'bi bi-sun-fill';
+        }
+        
+        // Bulk actions functionality
+        let selectedStudents = new Set();
+        
+        function updateBulkActions() {
+            const bulkActions = document.getElementById('bulk-actions');
+            const selectedCount = document.getElementById('selected-count');
+            
+            selectedCount.textContent = selectedStudents.size;
+            bulkActions.style.display = selectedStudents.size > 0 ? 'block' : 'none';
+        }
+        
+        function toggleStudentSelection(id, checkbox) {
+            if (checkbox.checked) {
+                selectedStudents.add(id);
+            } else {
+                selectedStudents.delete(id);
+            }
+            updateBulkActions();
+        }
+        
+        document.getElementById('select-all-btn').addEventListener('click', () => {
+            document.querySelectorAll('.student-checkbox').forEach(cb => {
+                cb.checked = true;
+                selectedStudents.add(parseInt(cb.dataset.id));
+            });
+            updateBulkActions();
+        });
+        
+        document.getElementById('deselect-all-btn').addEventListener('click', () => {
+            document.querySelectorAll('.student-checkbox').forEach(cb => cb.checked = false);
+            selectedStudents.clear();
+            updateBulkActions();
+        });
+        
+        document.getElementById('bulk-delete-btn').addEventListener('click', async () => {
+            if (selectedStudents.size === 0) return;
+            
+            if (!confirm(`Delete ${selectedStudents.size} selected students? This cannot be undone.`)) return;
+            
+            showLoading();
+            
+            try {
+                const promises = Array.from(selectedStudents).map(id => 
+                    fetch(API_URL, {
+                        method: 'DELETE',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({ id })
+                    })
+                );
+                
+                await Promise.all(promises);
+                selectedStudents.clear();
+                updateBulkActions();
+                fetchStudents();
+                notyf.success('Selected students deleted successfully');
+            } catch (error) {
+                notyf.error('Error deleting students');
+            } finally {
+                hideLoading();
+            }
+        });
+        let API_URL = '/api/students.php';
+        let AUTH_URL = '/api/auth.php';
+        let CONFIG_LOADED = false;
+        
+        fetch('/api/config.php')
+            .then(response => response.json())
+            .then(config => {
+                API_URL = config.studentsUrl;
+                AUTH_URL = config.authUrl;
+                CONFIG_LOADED = true;
+                fetchStudents();
+            })
+            .catch(error => {
+                console.error('Failed to load config:', error);
+                CONFIG_LOADED = true;
+                fetchStudents();
+            });
+        
+        let currentPage = 1;
+
+        document.getElementById('logout-btn').addEventListener('click', async () => {
+            try {
+                // Clear frontend session
+                await fetch('logout.php', { method: 'POST' });
+                window.location.href = 'login.php';
+            } catch (error) {
+                // Fallback - just redirect
+                window.location.href = 'login.php';
+            }
+        });
+
+        async function fetchStudents() {
+            if (!CONFIG_LOADED) {
+                setTimeout(fetchStudents, 100);
+                return;
+            }
+
+            showLoading();
+            const params = new URLSearchParams({
+                page: currentPage,
+                limit: 12,
+                search: document.getElementById('search-input').value,
+                status: document.getElementById('status-filter').value,
+                sort_by: document.getElementById('sort-field').value
+            });
+
+            try {
+                const response = await fetch(`${API_URL}?${params}`, {
+                    credentials: 'include',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                const data = await response.json();
+
+                if (response.ok && data.status === 'success') {
+                    renderStudents(data.data);
+                    renderPagination(data.pagination);
+                    updateStats(data.statusCounts, data.pagination.total);
+                    notyf.success('Students loaded successfully');
+                } else {
+                    notyf.error('Failed to load students');
+                }
+            } catch (error) {
+                console.error('Fetch error:', error);
+                notyf.error('Network error occurred');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function renderStudents(students) {
+            const grid = document.getElementById('students-grid');
+            
+            if (students.length === 0) {
+                grid.innerHTML = `
+                    <div class="col-12 text-center py-5">
+                        <i class="bi bi-inbox" style="font-size: 5rem; color: #ccc;"></i>
+                        <h3 class="mt-3">No Students Found</h3>
+                        <p class="text-muted">Try adjusting your search criteria or add a new student.</p>
+                        <a href="add-student.php" class="btn btn-primary mt-3">
+                            <i class="bi bi-plus-circle"></i> Add First Student
+                        </a>
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = students.map(student => {
+                const statusClass = student.status === 'active' ? 'badge-active' : 
+                                  student.status === 'inactive' ? 'badge-inactive' : 'badge-graduated';
+                
+                const avatarHtml = student.profile_photo 
+                    ? `<img src="/${student.profile_photo}" alt="${student.Name}" class="student-avatar">`
+                    : `<div class="student-avatar-default">${student.Name.charAt(0).toUpperCase()}</div>`;
+                
+                return `
+                    <div class="col-lg-4 col-md-6">
+                        <div class="student-card position-relative">
+                            <input type="checkbox" class="form-check-input student-checkbox" 
+                                   data-id="${student.ID}" 
+                                   onchange="toggleStudentSelection(${student.ID}, this)">
+                            
+                            <div class="d-flex align-items-center mb-3">
+                                ${avatarHtml}
+                                <div class="ms-3 flex-grow-1">
+                                    <h5 class="mb-1 fw-bold">${student.Name}</h5>
+                                    <p class="text-muted mb-2" style="font-size: 0.9rem;">
+                                        <i class="bi bi-envelope"></i> ${student.Email}
+                                    </p>
+                                    <span class="badge-status ${statusClass}">${student.status}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="row g-2 mb-3" style="font-size: 0.9rem;">
+                                <div class="col-6">
+                                    <i class="bi bi-calendar-event text-primary"></i> Age: <strong>${student.Age}</strong>
+                                </div>
+                                <div class="col-6">
+                                    <i class="bi bi-telephone text-success"></i> ${student.phone || 'N/A'}
+                                </div>
+                            </div>
+                            
+                            ${student.address ? `<p class="text-muted small mb-3"><i class="bi bi-geo-alt"></i> ${student.address.length > 60 ? student.address.substring(0, 60) + '...' : student.address}</p>` : ''}
+                            
+                            <div class="d-grid gap-2">
+                                <button onclick="editStudent(${student.ID})" class="btn btn-outline-primary btn-sm">
+                                    <i class="bi bi-pencil"></i> Edit
+                                </button>
+                                <button onclick="deleteStudent(${student.ID}, '${student.Name.replace(/'/g, "\\'")}', this)" class="btn btn-outline-danger btn-sm">
+                                    <i class="bi bi-trash"></i> Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderPagination(pagination) {
+            const paginationEl = document.getElementById('pagination');
+            const { page, pages } = pagination;
+            
+            if (pages <= 1) {
+                paginationEl.innerHTML = '';
+                return;
+            }
+            
+            let html = '';
+            
+            if (page > 1) {
+                html += `<li class="page-item"><a class="page-link" href="#" onclick="changePage(${page - 1}); return false;"><i class="bi bi-chevron-left"></i></a></li>`;
+            }
+            
+            for (let i = Math.max(1, page - 2); i <= Math.min(pages, page + 2); i++) {
+                html += `<li class="page-item ${i === page ? 'active' : ''}"><a class="page-link" href="#" onclick="changePage(${i}); return false;">${i}</a></li>`;
+            }
+            
+            if (page < pages) {
+                html += `<li class="page-item"><a class="page-link" href="#" onclick="changePage(${page + 1}); return false;"><i class="bi bi-chevron-right"></i></a></li>`;
+            }
+            
+            paginationEl.innerHTML = html;
+        }
+
+        function updateStats(statusCounts, total) {
+            document.getElementById('total-count').textContent = total;
+            document.getElementById('active-count').textContent = statusCounts.active || 0;
+            document.getElementById('inactive-count').textContent = statusCounts.inactive || 0;
+            document.getElementById('graduated-count').textContent = statusCounts.graduated || 0;
+        }
+
+        function changePage(page) {
+            currentPage = page;
+            fetchStudents();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        async function deleteStudent(id, name, button) {
+            if (!confirm(`Are you sure you want to delete ${name}? This action cannot be undone.`)) return;
+            
+            const originalText = button.innerHTML;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            button.disabled = true;
+            
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'DELETE',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ id })
+                });
+                
+                if (response.ok) {
+                    fetchStudents();
+                } else {
+                    alert('Delete failed');
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                }
+            } catch (error) {
+                alert('Network error');
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+
+        function editStudent(id) {
+            window.location.href = `edit.php?id=${id}`;
+        }
+
+        document.getElementById('refresh-btn').addEventListener('click', () => {
+            fetchStudents();
+        });
+
+        function showError(message) {
+            notyf.error(message);
+        }
+
+        document.getElementById('search-input').addEventListener('input', debounce(() => {
+            currentPage = 1;
+            fetchStudents();
+        }, 500));
+
+        document.getElementById('status-filter').addEventListener('change', () => {
+            currentPage = 1;
+            fetchStudents();
+        });
+
+        document.getElementById('sort-field').addEventListener('change', fetchStudents);
+
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            document.getElementById('search-input').value = '';
+            document.getElementById('status-filter').value = '';
+            document.getElementById('sort-field').value = 'Name';
+            currentPage = 1;
+            fetchStudents();
+        });
+
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+    </script>
+</body>
+</html>
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\src\images\background-image.png ===
+[SKIPPED] Binary file or unsupported encoding.
+
+=== FILE: d:\Projects\3-tier-PHP-application\frontend\src\images\icon.png ===
+[SKIPPED] Binary file or unsupported encoding.
+
+=== FILE: d:\Projects\3-tier-PHP-application\init\init.sql ===
+-- TIER 3: DATABASE INITIALIZATION SCRIPT
+
+-- Users table for Admin Authentication (No IP restrictions)
+CREATE TABLE IF NOT EXISTS users (
+    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Enhanced Student table with new fields
+CREATE TABLE IF NOT EXISTS student (
+    ID INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    Name VARCHAR(255) NOT NULL,
+    Email VARCHAR(255) NOT NULL UNIQUE,
+    Age INT(3) NOT NULL,
+    profile_photo VARCHAR(255),
+    phone VARCHAR(20),
+    address TEXT,
+    enrollment_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    status ENUM('active', 'inactive', 'graduated') DEFAULT 'active',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Performance indexes for Name and Email
+CREATE INDEX idx_student_name ON student(Name);
+CREATE INDEX idx_student_email ON student(Email);
+CREATE INDEX idx_student_status ON student(status);
+
+-- Sample students with Neo-Brutalist Pop vibes
+INSERT INTO student (Name, Email, Age, phone, address, status) VALUES 
+('Zara Khan', 'zara.khan@amu.ac.in', 21, '+91-9876543210', 'Flat 12, Zakir Nagar, New Delhi', 'active'),
+('Aman Gupta', 'aman.gupta@vit.ac.in', 22, '+91-9876543211', 'Room 203, Boys Hostel, Vellore', 'active'),
+('Sneha Joshi', 'sneha.joshi@mitwpu.edu.in', 20, '+91-9876543212', 'Karve Nagar, Pune, Maharashtra', 'graduated'),
+('Karthik Reddy', 'karthik.reddy@cbit.ac.in', 19, '+91-9876543213', 'Madhapur, Hyderabad, Telangana', 'active'),
+('Nisha Patel', 'nisha.patel@gtu.ac.in', 23, '+91-9876543214', 'Satellite Road, Ahmedabad, Gujarat', 'inactive');
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\nginx\default.conf ===
+server {
+    listen 80;
+    server_name _;
+
+    # ======================
+    # Security Headers
+    # ======================
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    # ======================
+    # UPLOADS (Static Files)
+    # ======================
+    location /uploads/ {
+        proxy_pass http://3tier-backend:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # ======================
+    # BACKEND API
+    # ======================
+    location /api/ {
+        proxy_pass http://3tier-backend:80;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # ======================
+    # FRONTEND APP
+    # ======================
+    location / {
+        proxy_pass http://3tier-frontend:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # ======================
+    # HARD BLOCK SENSITIVE FILES
+    # ======================
+    location ~* \.(env|ini|log|sql|bak|old|sh)$ {
+        deny all;
+        return 404;
+    }
+
+    # Disable directory listing
+    autoindex off;
+}
+
+
+=== FILE: d:\Projects\3-tier-PHP-application\tools\.env.tools ===
+JENKINS_SECRET=d1e46beb76f8c72fbc9fb00df191f6fe9eacffb93d8f4bb7878c6bdcd5e01283
+JENKINS_URL=http://4.240.107.20:8080
+JENKINS_AGENT_NAME=wsl-agent
+
+=== FILE: d:\Projects\3-tier-PHP-application\tools\docker-compose-tools.yml ===
+version: "3.8"
+
+services:
+  # Tool 1: SonarQube
+  sonarqube:
+    image: sonarqube:lts-community
+    container_name: tools-sonar
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+    volumes:
+      - sonar_data:/opt/sonarqube/data
+    networks:
+      - tools-net
+
+  # Tool 2: Jenkins Agent
+  jenkins-agent:
+    image: jenkins/inbound-agent:latest
+    container_name: tools-agent
+    restart: unless-stopped
+    user: root
+    env_file: .env.tools
+    environment:
+      - JENKINS_URL=${JENKINS_URL}
+      - JENKINS_AGENT_NAME=${JENKINS_AGENT_NAME}
+      - JENKINS_SECRET=${JENKINS_SECRET}
+      # CRITICAL FIX: Enable WebSocket to connect via Port 8080
+      - JENKINS_WEB_SOCKET=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agent_work:/home/jenkins/agent
+    networks:
+      - tools-net
+
+networks:
+  tools-net:
+    driver: bridge
+
+volumes:
+  sonar_data:
+  agent_work:
+
