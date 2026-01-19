@@ -21,7 +21,7 @@ services:
     container_name: tools-agent
     restart: unless-stopped
     user: root
-    env_file: .env.tools
+    env_file: .env
     environment:
       - JENKINS_URL=${JENKINS_URL}
       - JENKINS_AGENT_NAME=${JENKINS_AGENT_NAME}
