@@ -1,0 +1,35 @@
+# Allow API access
+<Files "*.php">
+  <RequireAll>
+    Require all granted
+  </RequireAll>
+</Files>
+
+# Block sensitive files
+<FilesMatch "\.(env|log|ini|sql|bak|old)$">
+  Require all denied
+</FilesMatch>
+
+# Security headers
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "DENY"
+  Header set X-XSS-Protection "1; mode=block"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+  Header set Access-Control-Allow-Origin "*"
+  Header set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+  Header set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+  Header set Access-Control-Allow-Credentials "true"
+</IfModule>
+
+# Rate limiting (if mod_evasive is available)
+<IfModule mod_evasive24.c>
+    DOSHashTableSize    2048
+    DOSPageCount        10
+    DOSPageInterval     1
+    DOSSiteCount        50
+    DOSSiteInterval     1
+    DOSBlockingPeriod   600
+</IfModule>
+
+Options -Indexes

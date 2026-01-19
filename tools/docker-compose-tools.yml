@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   # Tool 1: SonarQube
@@ -21,10 +21,11 @@ services:
     container_name: tools-agent
     restart: unless-stopped
     user: root
+    env_file: .env
     environment:
-      - JENKINS_URL=http://4.240.107.20:8080
-      - JENKINS_AGENT_NAME=wsl-agent
-      - JENKINS_SECRET=d1e46beb76f8c72fbc9fb00df191f6fe9eacffb93d8f4bb7878c6bdcd5e01283
+      - JENKINS_URL=${JENKINS_URL}
+      - JENKINS_AGENT_NAME=${JENKINS_AGENT_NAME}
+      - JENKINS_SECRET=${JENKINS_SECRET}
       # CRITICAL FIX: Enable WebSocket to connect via Port 8080
       - JENKINS_WEB_SOCKET=true
     volumes:
