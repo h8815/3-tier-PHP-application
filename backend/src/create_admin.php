@@ -5,6 +5,36 @@
 $_SERVER['REQUEST_METHOD'] = 'CLI';
 require_once 'db.php';
 
+// Password validation function
+function validatePassword($password) {
+    // At least 8 characters
+    if (strlen($password) < 8) {
+        return false;
+    }
+    
+    // At least one uppercase letter
+    if (!preg_match('/[A-Z]/', $password)) {
+        return false;
+    }
+    
+    // At least one lowercase letter
+    if (!preg_match('/[a-z]/', $password)) {
+        return false;
+    }
+    
+    // At least one number
+    if (!preg_match('/[0-9]/', $password)) {
+        return false;
+    }
+    
+    // At least one special character
+    if (!preg_match('/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/', $password)) {
+        return false;
+    }
+    
+    return true;
+}
+
 echo "🎨 NEO-BRUTALIST STUDENT HUB - ADMIN CREATOR 🎨\n";
 echo "===============================================\n\n";
 
@@ -17,13 +47,38 @@ if (empty($username)) {
     exit(1);
 }
 
-// Get password
-echo "Enter admin password: ";
-$password = trim(fgets(STDIN));
+// Get password with retry logic
+$attempts = 0;
+$maxAttempts = 3;
 
-if (empty($password)) {
-    echo "❌ Error: Password cannot be empty.\n";
-    exit(1);
+while ($attempts < $maxAttempts) {
+    echo "Enter admin password (min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special): ";
+    $password = trim(fgets(STDIN));
+
+    if (empty($password)) {
+        echo "❌ Error: Password cannot be empty.\n";
+        $attempts++;
+        continue;
+    }
+
+    // Validate password strength
+    if (!validatePassword($password)) {
+        echo "❌ Error: Password must be at least 8 characters and contain:\n";
+        echo "   - At least 1 uppercase letter (A-Z)\n";
+        echo "   - At least 1 lowercase letter (a-z)\n";
+        echo "   - At least 1 number (0-9)\n";
+        echo "   - At least 1 special character (!@#$%^&*()_+-=[]{}|;:,.<>?)\n";
+        $attempts++;
+        echo "Attempts remaining: " . ($maxAttempts - $attempts) . "\n\n";
+        
+        if ($attempts >= $maxAttempts) {
+            echo "❌ Maximum attempts reached. Exiting...\n";
+            exit(1);
+        }
+        continue;
+    }
+    
+    break; // Password is valid
 }
 
 // Confirm password

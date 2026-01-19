@@ -3,3 +3,5 @@
 *.log
 .env.example
 .gitignore
+README.md
+docker-compose.yml
