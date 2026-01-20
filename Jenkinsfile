@@ -1,26 +1,29 @@
 pipeline {
-    agent { label 'wsl-agent' } 
+    agent { label 'wsl-agent' }
 
     environment {
-        // Azure Server Config
-        PROD_IP = "${3TIER_PROD_IP}"
-        
-        // UPDATED: Using your specific user
-        PROD_USER = "${3TIER_PROD_USER}" 
-        PROD_DIR = "/home/$PROD_USER/student-app"
+        // ===== Server Config (FIXED: no numeric var names) =====
+        PROD_IP   = "${env.TIER3_PROD_IP}"
+        PROD_USER = "${env.TIER3_PROD_USER}"
+        PROD_DIR  = "/home/${env.TIER3_PROD_USER}/student-app"
 
-        // URLs for validation
-        TEST_URL = "http://$PROD_IP:3000" 
-        API_URL  = "http://$PROD_IP:3000/api/students.php"
+        // ===== URLs =====
+        TEST_URL = "http://${env.TIER3_PROD_IP}:3000"
+        API_URL  = "http://${env.TIER3_PROD_IP}:3000/api/students.php"
     }
 
     stages {
-        stage('Cleanup') {
-            steps { cleanWs() }
+
+        stage('Cleanup Workspace') {
+            steps {
+                cleanWs()
+            }
         }
 
         stage('Checkout') {
-            steps { checkout scm }
+            steps {
+                checkout scm
+            }
         }
 
         stage('SonarQube Analysis') {
@@ -28,26 +31,34 @@ pipeline {
                 script {
                     def scannerHome = tool 'SonarScanner'
                     withSonarQubeEnv('SonarServer') {
-                        sh """${scannerHome}/bin/sonar-scanner \
+                        sh """
+                        ${scannerHome}/bin/sonar-scanner \
                         -Dsonar.projectKey=student-management-php \
                         -Dsonar.projectName='Student Management PHP' \
                         -Dsonar.sources=frontend/src,backend/src \
                         -Dsonar.php.exclusions=**/vendor/** \
-                        -Dsonar.sourceEncoding=UTF-8"""
+                        -Dsonar.sourceEncoding=UTF-8
+                        """
                     }
                 }
             }
         }
 
-        stage('Build & Push') {
+        stage('Build & Push Docker Images') {
             steps {
                 script {
                     sh 'docker build -t h8815/student-app-frontend:latest ./frontend'
                     sh 'docker build -t h8815/student-app-backend:latest ./backend'
 
-                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials-h8815', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'dockerhub-credentials-h8815',
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                        )
+                    ]) {
                         sh '''
-                            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                             docker push h8815/student-app-frontend:latest
                             docker push h8815/student-app-backend:latest
                         '''
@@ -58,29 +69,41 @@ pipeline {
 
         stage('Deploy to Azure') {
             steps {
-                // UPDATED: Using the specific ID you created
                 sshagent(['php-application-ssh-key']) {
                     script {
-                        // 1. Prepare .env file
-                        withCredentials([file(credentialsId: '3TIER-PHP', variable: 'ENVFILE')]) {
+
+                        // Copy .env securely from Jenkins
+                        withCredentials([
+                            file(credentialsId: '3TIER-PHP', variable: 'ENVFILE')
+                        ]) {
                             sh 'cp "$ENVFILE" .env'
                         }
 
-                        // 2. Create Directory on Azure (using c9lab user)
-                        sh "ssh -o StrictHostKeyChecking=no ${PROD_USER}@${PROD_IP} 'mkdir -p ${PROD_DIR}/nginx'"
-
-                        // 3. Copy Config Files to Azure
-                        sh "scp -o StrictHostKeyChecking=no docker-compose.yml .env ${PROD_USER}@${PROD_IP}:${PROD_DIR}/"
-                        sh "scp -o StrictHostKeyChecking=no nginx/default.conf ${PROD_USER}@${PROD_IP}:${PROD_DIR}/nginx/"
-
-                        // 4. Restart Containers on Azure
+                        // Create target directory
                         sh """
-                            ssh -o StrictHostKeyChecking=no ${PROD_USER}@${PROD_IP} '
-                                cd ${PROD_DIR}
-                                docker compose pull || true
-                                docker compose down || true
-                                docker compose up -d --force-recreate
-                            '
+                        ssh -o StrictHostKeyChecking=no ${PROD_USER}@${PROD_IP} \
+                        'mkdir -p ${PROD_DIR}/nginx'
+                        """
+
+                        // Copy deployment files
+                        sh """
+                        scp -o StrictHostKeyChecking=no docker-compose.yml .env \
+                        ${PROD_USER}@${PROD_IP}:${PROD_DIR}/
+                        """
+
+                        sh """
+                        scp -o StrictHostKeyChecking=no nginx/default.conf \
+                        ${PROD_USER}@${PROD_IP}:${PROD_DIR}/nginx/
+                        """
+
+                        // Restart containers
+                        sh """
+                        ssh -o StrictHostKeyChecking=no ${PROD_USER}@${PROD_IP} '
+                            cd ${PROD_DIR}
+                            docker compose pull || true
+                            docker compose down || true
+                            docker compose up -d --force-recreate
+                        '
                         """
                     }
                 }
@@ -90,18 +113,26 @@ pipeline {
         stage('Validation') {
             steps {
                 echo 'Validating Deployment...'
-                sh "curl -s ${API_URL} | grep 'success' || echo 'Waiting for DB...'"
+                sh """
+                curl -s ${API_URL} | grep -i success \
+                || echo '⚠️ API not ready yet'
+                """
             }
         }
     }
+
     post {
         always {
-            echo 'Cleaning up Docker artifacts on WSL Agent...'
-            sh 'docker image prune -f || true' 
+            node('wsl-agent') {
+                echo 'Cleaning up Docker artifacts on WSL Agent...'
+                sh 'docker image prune -f || true'
+            }
         }
+
         success {
             echo '✅ Pipeline and Deployment Succeeded!'
         }
+
         failure {
             echo '❌ Pipeline Failed. Check logs for details.'
         }
