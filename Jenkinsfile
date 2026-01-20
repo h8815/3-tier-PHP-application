@@ -1,5 +1,5 @@
 pipeline {
-    agent any   // Built-in node on Azure VM
+    agent {label 'jenkins-agent'}   // Built-in node on Azure VM
 
     environment {
         PROD_DIR = "/home/jenkins/student-app"
@@ -39,6 +39,17 @@ pipeline {
                 }
             }
         }
+
+        stage('Debug Identity') {
+            steps {
+                sh '''
+                whoami
+                id
+                pwd
+                '''
+            }
+        }
+
 
         stage('Build & Push Docker Images') {
             steps {
