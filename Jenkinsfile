@@ -2,7 +2,7 @@ pipeline {
     agent {label 'jenkins-agent'}   // Built-in node on Azure VM
 
     environment {
-        PROD_DIR = "/home/jenkins/student-app"
+        PROD_DIR = "/home/jenkins-agent/student-app"
 
         TEST_URL = "http://localhost:3000"
         API_URL  = "http://localhost:3000/api/students.php"
@@ -40,15 +40,15 @@ pipeline {
             }
         }
 
-        stage('Debug Identity') {
-            steps {
-                sh '''
-                whoami
-                id
-                pwd
-                '''
-            }
-        }
+        // stage('Debug Identity') {
+        //     steps {
+        //         sh '''
+        //         whoami
+        //         id
+        //         pwd
+        //         '''
+        //     }
+        // }
 
 
         stage('Build & Push Docker Images') {
