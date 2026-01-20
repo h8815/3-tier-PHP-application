@@ -216,7 +216,7 @@ elseif ($method === 'PUT') {
     $sql = "UPDATE " . DB_TABLE_STUDENT . " SET Name = ?, Email = ?, Age = ?, phone = ?, address = ?, status = ? WHERE ID = ? AND admin_id = ?";
     $stmt = $conn->prepare($sql);
     $adminId = getCurrentAdminId();
-    $stmt->bind_param("sissssii", $input['name'], $input['email'], $input['age'], $input['phone'], $input['address'], $input['status'], $id, $adminId);
+    $stmt->bind_param("ssisssii", $input['name'], $input['email'], $input['age'], $input['phone'], $input['address'], $input['status'], $id, $adminId);
     
     if ($stmt->execute()) {
         echo json_encode(['status' => 'updated', 'id' => $id, 'message' => 'Student updated successfully']);
