@@ -3,10 +3,10 @@ pipeline {
 
     environment {
         // Azure Server Config
-        PROD_IP = "${3TIER-PROD-IP}"
+        PROD_IP = "${3TIER_PROD_IP}"
         
         // UPDATED: Using your specific user
-        PROD_USER = "${3TIER-PROD-USER}" 
+        PROD_USER = "${3TIER_PROD_USER}" 
         PROD_DIR = "/home/$PROD_USER/student-app"
 
         // URLs for validation
