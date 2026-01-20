@@ -2,7 +2,6 @@ pipeline {
     agent { label 'jenkins-agent' }
 
     environment {
-        PROD_DIR = "/home/jenkins-agent/student-app"
         TEST_URL = "http://localhost:3000"
         API_URL  = "http://localhost:3000/api/students.php"
     }
@@ -68,33 +67,25 @@ pipeline {
                     withCredentials([
                         file(credentialsId: '3TIER-PHP', variable: 'ENVFILE')
                     ]) {
-
                         sh '''
                         set -e
 
-                        # Prepare env file
+                        cd "$WORKSPACE"
+
+                        # Prepare env
                         cp "$ENVFILE" .env
 
-                        # Stop running stack (if any)
-                        if [ -d "${PROD_DIR}" ]; then
-                          cd ${PROD_DIR} && docker compose down || true
-                        fi
+                        echo "Deploying from:"
+                        pwd
+                        ls -l init/init.sql
 
-                        # 🔥 HARD RESET PROD DIRECTORY (THIS FIXES init.sql ISSUE)
-                        rm -rf ${PROD_DIR}
-                        mkdir -p ${PROD_DIR}/nginx
+                        # Stop old stack
+                        docker compose down || true
 
-                        # Copy deployment artifacts fresh
-                        cp docker-compose.yml .env ${PROD_DIR}/
-                        cp -r init ${PROD_DIR}/
-                        cp nginx/default.conf ${PROD_DIR}/nginx/
-
-                        # Ownership sanity (important)
-                        chown -R jenkins-agent:jenkins-agent ${PROD_DIR}
-
-                        # Start stack
-                        cd ${PROD_DIR}
+                        # Pull latest images
                         docker compose pull
+
+                        # Start fresh
                         docker compose up -d --force-recreate
                         '''
                     }
