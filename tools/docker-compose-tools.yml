@@ -1,7 +1,6 @@
 version: "3.8"
 
 services:
-  # Tool 1: SonarQube
   sonarqube:
     image: sonarqube:lts-community
     container_name: tools-sonar
@@ -12,33 +11,6 @@ services:
       - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
     volumes:
       - sonar_data:/opt/sonarqube/data
-    networks:
-      - tools-net
-
-  # Tool 2: Jenkins Agent
-  jenkins-agent:
-    image: jenkins/inbound-agent:latest
-    container_name: tools-agent
-    restart: unless-stopped
-    user: root
-    env_file: 
-      - .env
-    environment:
-      - JENKINS_URL=${JENKINS_URL}
-      - JENKINS_AGENT_NAME=${JENKINS_AGENT_NAME}
-      - JENKINS_SECRET=${JENKINS_SECRET}
-      # CRITICAL FIX: Enable WebSocket to connect via Port 8080
-      - JENKINS_WEB_SOCKET=true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - agent_work:/home/jenkins/agent
-    networks:
-      - tools-net
-
-networks:
-  tools-net:
-    driver: bridge
 
 volumes:
   sonar_data:
-  agent_work:
