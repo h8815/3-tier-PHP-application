@@ -67,23 +67,14 @@ pipeline {
                     withCredentials([
                         file(credentialsId: '3TIER-PHP', variable: 'ENVFILE')
                     ]) {
+                        sh "cp ${ENVFILE} .env"
                         sh '''
-                        set -e
-
-                        cd "$WORKSPACE"
-
-                        # Prepare env
-                        cp "$ENVFILE" .env
-
-                        echo "Deploying from:"
-                        pwd
-                        ls -l init/init.sql
+                        
+                        # Pull latest images
+                        docker compose pull || true
 
                         # Stop old stack
                         docker compose down || true
-
-                        # Pull latest images
-                        docker compose pull
 
                         # Start fresh
                         docker compose up -d --force-recreate
