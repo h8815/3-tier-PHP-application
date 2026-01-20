@@ -3,15 +3,15 @@ pipeline {
 
     environment {
         // Azure Server Config
-        PROD_IP = "4.240.107.20"
+        PROD_IP = "${3TIER-PROD-IP}"
         
         // UPDATED: Using your specific user
-        PROD_USER = "c9lab" 
-        PROD_DIR = "/home/c9lab/student-app"
+        PROD_USER = "${3TIER-PROD-USER}" 
+        PROD_DIR = "/home/$PROD_USER/student-app"
 
         // URLs for validation
-        TEST_URL = "http://4.240.107.20:3000" 
-        API_URL  = "http://4.240.107.20:3000/api/students.php" 
+        TEST_URL = "http://$PROD_IP:3000" 
+        API_URL  = "http://$PROD_IP:3000/api/students.php"
     }
 
     stages {
@@ -45,7 +45,7 @@ pipeline {
                     sh 'docker build -t h8815/student-app-frontend:latest ./frontend'
                     sh 'docker build -t h8815/student-app-backend:latest ./backend'
 
-                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials-h8815', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
                             echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
                             docker push h8815/student-app-frontend:latest
@@ -77,9 +77,9 @@ pipeline {
                         sh """
                             ssh -o StrictHostKeyChecking=no ${PROD_USER}@${PROD_IP} '
                                 cd ${PROD_DIR}
-                                docker-compose pull
-                                docker-compose down || true
-                                docker-compose up -d --force-recreate
+                                docker compose pull || true
+                                docker compose down || true
+                                docker compose up -d --force-recreate
                             '
                         """
                     }
@@ -92,6 +92,18 @@ pipeline {
                 echo 'Validating Deployment...'
                 sh "curl -s ${API_URL} | grep 'success' || echo 'Waiting for DB...'"
             }
+        }
+    }
+    post {
+        always {
+            echo 'Cleaning up Docker artifacts on WSL Agent...'
+            sh 'docker image prune -f || true' 
+        }
+        success {
+            echo '✅ Pipeline and Deployment Succeeded!'
+        }
+        failure {
+            echo '❌ Pipeline Failed. Check logs for details.'
         }
     }
 }

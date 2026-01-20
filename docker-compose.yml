@@ -18,7 +18,8 @@ services:
 
   # Frontend (Internal Only - No Ports)
   frontend:
-    build: ./frontend
+    # build: ./frontend
+    image: h8815/student-app-frontend:latest
     container_name: 3tier-frontend
     restart: always
     environment:
@@ -29,7 +30,8 @@ services:
 
   # Backend (Internal Only - No Ports)
   backend:
-    build: ./backend
+    # build: ./backend
+    image: h8815/student-app-backend:latest
     container_name: 3tier-backend
     restart: always
     environment:
@@ -38,6 +40,8 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME}
       API_BASE_URL: ${API_BASE_URL:-http://localhost:3000}
+      # NEW: Pass the CORS settings to the backend
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
       SESSION_SAVE_PATH: /tmp/sessions
     volumes:
       - backend-sessions:/tmp/sessions

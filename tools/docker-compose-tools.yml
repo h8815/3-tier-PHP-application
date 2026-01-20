@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
     user: root
     env_file: 
-      - ../.env
+      - .env
     environment:
       - JENKINS_URL=${JENKINS_URL}
       - JENKINS_AGENT_NAME=${JENKINS_AGENT_NAME}
