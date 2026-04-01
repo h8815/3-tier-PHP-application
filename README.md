@@ -1,3 +1,4 @@
+
 # 🎓 Student Management System (3-Tier Architecture)
 
 A modern, containerized PHP application built with true 3-tier microservices architecture. This project demonstrates DevOps best practices including Docker containerization, frontend/backend separation, secure authentication, and a complete CI/CD pipeline using Jenkins and AWS.
