@@ -16,11 +16,328 @@ if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
     <link rel="icon" type="image/svg+xml" href="favicon.ico">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="style.css" rel="stylesheet">
+    <style>
+        @media (max-width: 1200px) {
+            body {
+                padding: 20px;
+            }
+
+            .card {
+                margin: 0 auto;
+            }
+
+            .page-header {
+                flex-direction: column;
+                gap: 16px;
+            }
+        }
+
+        @media (max-width: 992px) {
+            body {
+                padding: 16px;
+            }
+
+            .card-body {
+                padding: 2rem !important;
+            }
+
+            .page-header {
+                padding: 20px;
+            }
+
+            .page-title {
+                font-size: 2rem !important;
+            }
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 12px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+            }
+
+            .page-header {
+                padding: 16px;
+                border-radius: 12px;
+                margin-bottom: 16px;
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .page-header > div:first-child {
+                width: 100%;
+            }
+
+            .page-header > div:last-child {
+                width: 100%;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            .page-title {
+                font-size: 1.8rem !important;
+            }
+
+            .page-subtitle {
+                font-size: 0.95rem;
+            }
+
+            .card {
+                max-width: 100%;
+                margin: 0 auto;
+                border-radius: 12px;
+            }
+
+            .card-body {
+                padding: 1.5rem !important;
+            }
+
+            .drag-drop-area {
+                padding: 2rem 1.5rem !important;
+            }
+
+            .drag-drop-area div:first-child {
+                font-size: 3rem !important;
+            }
+
+            .row.g-3 {
+                gap: 1rem !important;
+            }
+
+            .col-md-6,
+            .col-md-4 {
+                flex: 0 0 100%;
+                max-width: 100%;
+            }
+
+            .form-floating > input,
+            .form-floating > select,
+            .form-floating > textarea {
+                font-size: 14px;
+            }
+
+            .btn-lg {
+                padding: 10px !important;
+                font-size: 0.95rem;
+            }
+        }
+
+        @media (max-width: 576px) {
+            body {
+                padding: 10px;
+            }
+
+            .page-header {
+                padding: 12px;
+                border-radius: 10px;
+                margin-bottom: 12px;
+            }
+
+            .page-title {
+                font-size: 1.5rem !important;
+            }
+
+            .page-subtitle {
+                font-size: 0.85rem;
+            }
+
+            .card {
+                border-radius: 10px;
+            }
+
+            .card-body {
+                padding: 1rem !important;
+            }
+
+            .drag-drop-area {
+                padding: 1.5rem 1rem !important;
+                border-radius: 12px;
+            }
+
+            .drag-drop-area > div:first-child {
+                font-size: 2.5rem !important;
+            }
+
+            .drag-drop-area p {
+                font-size: 0.9rem !important;
+            }
+
+            #drop-content button {
+                font-size: 0.85rem;
+                padding: 0.4rem 0.8rem;
+            }
+
+            .form-floating > label {
+                font-size: 0.9rem;
+            }
+
+            .form-floating > input,
+            .form-floating > select,
+            .form-floating > textarea {
+                font-size: 13px;
+                padding: 0.6rem 0.75rem;
+            }
+
+            .form-floating {
+                margin-bottom: 1rem !important;
+            }
+
+            .btn {
+                padding: 0.5rem 0.8rem;
+                font-size: 0.85rem;
+            }
+
+            .btn-lg {
+                padding: 8px !important;
+                font-size: 0.8rem;
+            }
+
+            .row.g-3 {
+                gap: 0.75rem !important;
+            }
+
+            .row.g-3 > * {
+                padding-right: 0.375rem;
+                padding-left: 0.375rem;
+            }
+
+            #message-container {
+                margin-bottom: 12px;
+            }
+
+            .alert {
+                padding: 0.75rem;
+                font-size: 0.85rem;
+                margin-bottom: 0;
+            }
+
+            .inline-block {
+                min-width: 200px !important;
+                padding: 16px !important;
+            }
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 8px;
+            }
+
+            .page-header {
+                padding: 10px;
+                border-radius: 8px;
+                margin-bottom: 10px;
+            }
+
+            .page-title {
+                font-size: 1.3rem !important;
+            }
+
+            .page-subtitle {
+                font-size: 0.8rem;
+            }
+
+            .card {
+                border-radius: 8px;
+            }
+
+            .card-body {
+                padding: 0.75rem !important;
+            }
+
+            .drag-drop-area {
+                padding: 1rem !important;
+                margin-bottom: 1rem;
+            }
+
+            .drag-drop-area > div:first-child {
+                font-size: 2rem !important;
+            }
+
+            .form-floating > label {
+                font-size: 0.85rem;
+            }
+
+            .form-floating > input,
+            .form-floating > select,
+            .form-floating > textarea {
+                font-size: 12px;
+                padding: 0.5rem 0.6rem;
+            }
+
+            .form-floating {
+                margin-bottom: 0.75rem !important;
+            }
+
+            .btn {
+                padding: 0.35rem 0.6rem;
+                font-size: 0.75rem;
+                width: 100%;
+            }
+
+            .btn-lg {
+                padding: 6px !important;
+                font-size: 0.75rem;
+                width: 100%;
+            }
+
+            .row.g-3 {
+                margin-left: -0.375rem;
+                margin-right: -0.375rem;
+            }
+
+            #photo-preview {
+                max-width: 120px !important;
+                max-height: 120px !important;
+            }
+
+            #file-name {
+                font-size: 0.8rem !important;
+            }
+
+            .page-header > div:last-child span {
+                font-size: 12px !important;
+            }
+
+            #submit-text {
+                font-size: 0.9rem !important;
+            }
+        }
+
+        @media (max-width: 320px) {
+            .page-title {
+                font-size: 1.1rem !important;
+            }
+
+            .card-body {
+                padding: 0.5rem !important;
+            }
+
+            .drag-drop-area {
+                padding: 0.75rem !important;
+            }
+
+            .form-floating > input,
+            .form-floating > select,
+            .form-floating > textarea {
+                font-size: 11px;
+                padding: 0.4rem 0.5rem;
+            }
+
+            .btn {
+                padding: 0.25rem 0.4rem !important;
+                font-size: 0.65rem;
+            }
+        }
+    </style>
 </head>
 <body style="padding: 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh;">
     
     <!-- Header -->
-    <div class="page-header" style="background: white; border-radius: 15px; padding: 24px; margin-bottom: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.1);">
+    <div class="page-header" style="background: white; border-radius: 15px; padding: 24px; margin-bottom: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: flex-start;">
         <div>
             <h1 class="page-title" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.5rem; font-weight: 800;">ADD NEW STUDENT</h1>
             <p class="page-subtitle" style="color: #6c757d;">Create a new student profile</p>
@@ -121,7 +438,7 @@ if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
 
     <!-- Statistics -->
     <div style="margin-top: 48px; text-align: center;">
-        <div class="card shadow-lg border-0" style="display: inline-block; min-width: 250px; border-radius: 15px; padding: 24px; background: white;">
+        <div class="card shadow-lg border-0" style="display: inline-block; min-width: 250px; border-radius: 15px; padding: 24px; background: white;" class="inline-block">
             <div style="font-size: 3rem; font-weight: 800; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px;" id="student-count">0</div>
             <div style="font-weight: 600; text-transform: uppercase; color: #6c757d;">Students Registered</div>
         </div>

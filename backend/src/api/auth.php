@@ -44,8 +44,9 @@ try {
         }
     }
 
-    // --- POST Request (Login) ---
+    // --- POST Request (Login or Register) ---
     if ($method === 'POST') {
+        $action = $data['action'] ?? 'login';  // Default to login for backwards compatibility
         $username = trim($data['username'] ?? '');
         $password = $data['password'] ?? '';
         
@@ -57,48 +58,157 @@ try {
         
         // Check if users table exists
         $tableCheck = $conn->query("SHOW TABLES LIKE 'users'");
-        if ($tableCheck->num_rows == 0) {
+        if ($tableCheck->num_rows == 0 && $action === 'login') {
             http_response_code(401);
-            echo json_encode(['status' => 'error', 'message' => 'No admin users exist. Please create one using CLI.']);
+            echo json_encode(['status' => 'error', 'message' => 'No users exist. Please create an account first.']);
             exit;
         }
         
-        $sql = "SELECT id, username, password_hash FROM users WHERE username = ?";
-        $stmt = $conn->prepare($sql);
+        if ($action === 'register') {
+            // Registration logic
+            
+            // Validate username length
+            if (strlen($username) < 3) {
+                http_response_code(400);
+                echo json_encode(['status' => 'error', 'message' => 'Username must be at least 3 characters long']);
+                exit;
+            }
+            
+            // Validate password strength
+            $passwordErrors = [];
+            
+            if (strlen($password) < 8) {
+                $passwordErrors[] = 'Password must be at least 8 characters long';
+            }
+            if (!preg_match('/[A-Z]/', $password)) {
+                $passwordErrors[] = 'Password must contain at least 1 uppercase letter (A-Z)';
+            }
+            if (!preg_match('/[a-z]/', $password)) {
+                $passwordErrors[] = 'Password must contain at least 1 lowercase letter (a-z)';
+            }
+            if (!preg_match('/[0-9]/', $password)) {
+                $passwordErrors[] = 'Password must contain at least 1 number (0-9)';
+            }
+            if (!preg_match('/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/', $password)) {
+                $passwordErrors[] = 'Password must contain at least 1 special character (!@#$%^&*()_+-=[]{}|;:,.<>?)';
+            }
+            
+            if (!empty($passwordErrors)) {
+                http_response_code(400);
+                echo json_encode([
+                    'status' => 'error', 
+                    'message' => 'Password does not meet requirements: ' . implode('; ', $passwordErrors)
+                ]);
+                exit;
+            }
+            
+            // Create users table if it doesn't exist
+            if ($tableCheck->num_rows == 0) {
+                $createTable = "CREATE TABLE users (
+                    id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    username VARCHAR(50) NOT NULL UNIQUE,
+                    password_hash VARCHAR(255) NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )";
+                if (!$conn->query($createTable)) {
+                    throw new Exception('Failed to create users table: ' . $conn->error);
+                }
+            }
+            
+            // Check if username already exists
+            $checkSql = "SELECT id FROM users WHERE username = ?";
+            $checkStmt = $conn->prepare($checkSql);
+            
+            if (!$checkStmt) {
+                throw new Exception('Database prepare failed: ' . $conn->error);
+            }
+            
+            $checkStmt->bind_param("s", $username);
+            $checkStmt->execute();
+            $checkResult = $checkStmt->get_result();
+            
+            if ($checkResult->num_rows > 0) {
+                http_response_code(400);
+                echo json_encode(['status' => 'error', 'message' => 'Username already exists. Please choose a different one.']);
+                exit;
+            }
+            
+            // Hash password with ARGON2ID
+            $passwordHash = password_hash($password, PASSWORD_ARGON2ID);
+            
+            // Insert new user
+            $insertSql = "INSERT INTO users (username, password_hash) VALUES (?, ?)";
+            $insertStmt = $conn->prepare($insertSql);
+            
+            if (!$insertStmt) {
+                throw new Exception('Database prepare failed: ' . $conn->error);
+            }
+            
+            $insertStmt->bind_param("ss", $username, $passwordHash);
+            
+            if ($insertStmt->execute()) {
+                http_response_code(201);
+                echo json_encode([
+                    'status' => 'success',
+                    'message' => 'Account created successfully! You can now login.'
+                ]);
+                exit;
+            } else {
+                throw new Exception('Failed to create account: ' . $conn->error);
+            }
+        } 
+        else if ($action === 'login') {
+            // Login logic
+            
+            // Check if users table exists
+            if ($tableCheck->num_rows == 0) {
+                http_response_code(401);
+                echo json_encode(['status' => 'error', 'message' => 'No users exist. Please create an account first.']);
+                exit;
+            }
+            
+            $sql = "SELECT id, username, password_hash FROM users WHERE username = ?";
+            $stmt = $conn->prepare($sql);
 
-        if (!$stmt) {
-            throw new Exception('Database prepare failed: ' . $conn->error);
-        }
+            if (!$stmt) {
+                throw new Exception('Database prepare failed: ' . $conn->error);
+            }
 
-        $stmt->bind_param("s", $username);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $user = $result->fetch_assoc();
+            $stmt->bind_param("s", $username);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $user = $result->fetch_assoc();
 
-        if (!$user || !password_verify($password, $user['password_hash'])) {
-            http_response_code(401);
-            echo json_encode(['status' => 'error', 'message' => 'Invalid credentials']);
+            if (!$user || !password_verify($password, $user['password_hash'])) {
+                http_response_code(401);
+                echo json_encode(['status' => 'error', 'message' => 'Invalid credentials']);
+                exit;
+            }
+
+            // Set session variables with correct names
+            $_SESSION['admin_id'] = $user['id'];
+            $_SESSION['admin_username'] = $user['username'];
+            $_SESSION['admin_logged_in'] = true;
+            $_SESSION['authenticated'] = true;
+            $_SESSION['username'] = $user['username'];
+            $_SESSION['user_id'] = $user['id'];
+            $_SESSION['last_activity'] = time();
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Welcome to the Neo-Brutalist Hub!',
+                'user' => [
+                    'id' => $user['id'],
+                    'username' => $user['username']
+                ]
+            ]);
             exit;
         }
-
-        // Set session variables with correct names
-        $_SESSION['admin_id'] = $user['id'];
-        $_SESSION['admin_username'] = $user['username'];
-        $_SESSION['admin_logged_in'] = true;
-        $_SESSION['authenticated'] = true;
-        $_SESSION['username'] = $user['username'];
-        $_SESSION['user_id'] = $user['id'];
-        $_SESSION['last_activity'] = time();
-
-        echo json_encode([
-            'status' => 'success',
-            'message' => 'Welcome to the Neo-Brutalist Hub!',
-            'user' => [
-                'id' => $user['id'],
-                'username' => $user['username']
-            ]
-        ]);
-        exit;
+        else {
+            http_response_code(400);
+            echo json_encode(['status' => 'error', 'message' => 'Invalid action']);
+            exit;
+        }
     }
 
     // --- GET Request (Check session) ---

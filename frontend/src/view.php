@@ -80,12 +80,41 @@ require_once 'auth_check.php';
             z-index: 10;
         }
         
-        /* Mobile Responsiveness */
+        /* Mobile Responsiveness - Enhanced */
+        @media (max-width: 1200px) {
+            .nav-brand {
+                font-size: 1.6rem;
+            }
+            
+            .stats-number {
+                font-size: 2.2rem;
+            }
+        }
+
+        @media (max-width: 992px) {
+            .stats-card {
+                padding: 20px;
+            }
+
+            .nav-brand {
+                font-size: 1.4rem;
+            }
+
+            .top-nav .d-flex {
+                flex-wrap: wrap;
+            }
+        }
+        
         @media (max-width: 768px) {
             .stats-card {
                 margin-bottom: 15px;
+                padding: 20px;
             }
             
+            .search-box {
+                padding: 15px;
+            }
+
             .search-box .row {
                 gap: 10px;
             }
@@ -98,15 +127,34 @@ require_once 'auth_check.php';
             
             .student-card {
                 margin-bottom: 15px;
+                padding: 15px;
             }
             
             .nav-brand {
                 font-size: 1.2rem;
             }
+
+            .stats-number {
+                font-size: 1.8rem;
+            }
             
             .top-nav .d-flex {
                 flex-direction: column;
                 gap: 10px;
+            }
+
+            .top-nav .btn {
+                width: 100%;
+            }
+
+            .pagination {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            .pagination .page-link {
+                padding: 0.4rem 0.5rem;
+                font-size: 0.85rem;
             }
         }
         
@@ -116,11 +164,203 @@ require_once 'auth_check.php';
             }
             
             .stats-number {
-                font-size: 2rem;
+                font-size: 1.5rem;
+            }
+
+            .stats-label {
+                font-size: 0.85rem;
             }
             
             .student-card {
+                padding: 12px;
+                margin-bottom: 12px;
+            }
+
+            .nav-brand {
+                font-size: 1rem;
+            }
+
+            .top-nav {
+                padding: 10px 0;
+            }
+
+            .top-nav .d-flex {
+                justify-content: flex-start;
+            }
+
+            .btn-sm {
+                padding: 0.3rem 0.6rem;
+                font-size: 0.75rem;
+            }
+
+            .search-box {
+                padding: 12px;
+                margin-top: 10px;
+            }
+
+            .search-box input,
+            .search-box select {
+                font-size: 14px;
+                padding: 8px;
+            }
+
+            .form-control,
+            .form-select {
+                font-size: 14px;
+            }
+
+            .student-card h5 {
+                font-size: 0.95rem;
+            }
+
+            .student-card p {
+                font-size: 0.85rem;
+                margin-bottom: 0.3rem;
+            }
+
+            .bulk-actions {
+                padding: 10px;
+                margin-bottom: 15px;
+                font-size: 0.9rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .container-fluid {
+                padding: 8px;
+            }
+
+            .stats-text {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                text-align: center;
+            }
+
+            .stats-number {
+                font-size: 1.3rem;
+                margin-bottom: 0.3rem;
+            }
+
+            .stats-label {
+                font-size: 0.8rem;
+            }
+
+            .nav-brand {
+                font-size: 0.9rem;
+            }
+
+            .student-card {
+                padding: 10px;
+                margin-bottom: 10px;
+            }
+
+            .student-card img {
+                width: 50px;
+                height: 50px;
+            }
+
+            .student-card h5 {
+                font-size: 0.9rem;
+            }
+
+            .student-card p {
+                font-size: 0.8rem;
+                margin-bottom: 0.2rem;
+            }
+
+            .btn {
+                padding: 0.35rem 0.5rem;
+                font-size: 0.75rem;
+            }
+
+            .top-nav {
+                padding: 8px 0;
+            }
+
+            .top-nav .d-flex {
+                gap: 5px;
+            }
+
+            .search-box {
+                padding: 10px;
+            }
+
+            .search-box .row {
+                gap: 8px;
+            }
+
+            .search-box input,
+            .search-box select {
+                font-size: 13px;
+                padding: 6px;
+            }
+
+            .form-control,
+            .form-select {
+                font-size: 13px;
+            }
+
+            .pagination {
+                font-size: 0.8rem;
+            }
+
+            .pagination .page-link {
+                padding: 0.3rem 0.4rem;
+                font-size: 0.7rem;
+            }
+
+            .bulk-actions {
+                padding: 8px;
+                margin-bottom: 12px;
+                font-size: 0.85rem;
+            }
+
+            .student-checkbox {
+                top: 8px;
+                left: 8px;
+            }
+        }
+
+        @media (max-width: 320px) {
+            .container-fluid {
+                padding: 6px;
+            }
+
+            .nav-brand {
+                font-size: 0.8rem;
+            }
+
+            .stats-card {
                 padding: 15px;
+                margin-bottom: 10px;
+            }
+
+            .stats-number {
+                font-size: 1.2rem;
+            }
+
+            .student-card {
+                padding: 8px;
+                margin-bottom: 8px;
+            }
+
+            .btn {
+                padding: 0.25rem 0.4rem;
+                font-size: 0.7rem;
+            }
+
+            .top-nav {
+                padding: 6px 0;
+            }
+
+            .search-box {
+                padding: 8px;
+            }
+
+            .search-box input,
+            .search-box select {
+                font-size: 12px;
             }
         }
         

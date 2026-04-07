@@ -1,341 +1,205 @@
-# 🎓 Student Management System (3-Tier Architecture)
+# 3-Tier DevSecOps Pipeline
 
-A modern, containerized PHP application built with true 3-tier microservices architecture. This project demonstrates DevOps best practices including Docker containerization, frontend/backend separation, secure authentication, and a complete CI/CD pipeline using Jenkins and AWS.
+Production-style 3-tier PHP application with a DevSecOps-oriented delivery workflow. The stack is containerized with Docker Compose, fronted by Nginx, analyzed by SonarQube in CI, and deployed through Jenkins.
 
-![PHP](https://img.shields.io/badge/PHP-8.2-blue)
-![MySQL](https://img.shields.io/badge/MySQL-8.0-orange)
-![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
-![Architecture](https://img.shields.io/badge/Architecture-3--Tier-green)
-![CICD](https://img.shields.io/badge/CI%2FCD-Jenkins-red)
-![Security](https://img.shields.io/badge/Security-Enhanced-purple)
+## Project Intent
 
-## 🏗️ Architecture Overview
+This repository demonstrates how to run and operate a simple business app with platform engineering concerns in mind:
 
-This application is decoupled into three isolated layers running in separate Docker containers:
+- Reproducible local and server environments with containers
+- Isolated service boundaries (frontend, backend API, database, gateway)
+- CI automation with quality scanning and image publishing
+- Secure-by-default runtime controls (headers, network isolation, secrets via credentials)
 
-### 1. **Presentation Tier (Frontend)**
-- **Container**: `3tier-frontend`
-- **Technology**: Apache/PHP 8.2
-- **Features**: Responsive HTML/CSS/JS interface with Bootstrap 5
-- **Capabilities**: Dark/Light mode, mobile-responsive, toast notifications
-- **Communication**: REST API calls to backend
+## Architecture
 
-### 2. **Logic Tier (Backend API)**
-- **Container**: `3tier-backend` 
-- **Technology**: Apache/PHP 8.2
-- **Features**: RESTful JSON endpoints (GET, POST, PUT, DELETE)
-- **Security**: Session-based authentication, CORS protection, input validation
-- **File Handling**: Image upload/management with validation
+### Service Topology
 
-### 3. **Data Tier (Database)**
-- **Container**: `3tier-database`
-- **Technology**: MySQL 8.0
-- **Features**: Persistent storage with Docker volumes
-- **Security**: Environment-based credentials, health checks
+- `nginx` (`3tier-nginx`): Public entrypoint on port `3000`, reverse-proxy to internal services, sets HTTP security headers
+- `frontend` (`3tier-frontend`): PHP/Apache presentation layer, internal-only
+- `backend` (`3tier-backend`): PHP/Apache API layer, internal-only
+- `database` (`3tier-database`): MySQL 8 with healthcheck and persistent volume
 
-### 4. **Gateway Layer (Nginx)**
-- **Container**: `3tier-nginx`
-- **Technology**: Nginx reverse proxy
-- **Purpose**: Single entry point, load balancing, security headers
-- **Port**: 3000 (only exposed port)
+Only Nginx is exposed externally. Frontend, backend, and database communicate through the internal Docker bridge network `3tier-network`.
 
-## 🚀 Features
+### Data and Session Persistence
 
-### Core Functionality
-- ✅ **Full CRUD Operations**: Create, Read, Update, Delete student records
-- 👤 **User Management**: Secure admin authentication with strong password requirements
-- 📸 **Photo Management**: Upload, edit, and remove student profile photos
-- 🔍 **Advanced Search**: Filter by name, email, status with pagination
-- 📊 **Real-time Statistics**: Live student count and status monitoring
+- `db-data`: MySQL persistent storage
+- `backend-sessions`: PHP session persistence for backend auth sessions
+- `backend-uploads`: Uploaded student profile photos
 
-### User Experience
-- 🎨 **Modern UI**: Neo-brutalist design with Bootstrap 5
-- 🌓 **Dark/Light Mode**: Toggle between themes with persistence
-- 📱 **Mobile Responsive**: Optimized for all device sizes
-- 🔔 **Toast Notifications**: Real-time feedback with dismissible alerts
-- ⚡ **Bulk Actions**: Select and manage multiple students
-- 🔄 **Loading States**: Smooth animations and progress indicators
+## Repository Layout
 
-### Technical Features
-- 🐳 **Fully Dockerized**: Complete containerization with docker-compose
-- 🔒 **Security Enhanced**: Strong password policies, CORS protection, input validation
-- 🔄 **CI/CD Ready**: Jenkins pipeline configuration included
-- 📈 **Development Tools**: SonarQube integration for code quality
-- 🌐 **API-First Design**: Separate backend that can serve multiple frontends
-
-## 📂 Project Structure
-
-```
-student-management-system/
-├── docker-compose.yml          # Main orchestration file
-├── .env                        # Environment configuration
-├── .gitignore                  # Comprehensive ignore patterns
-├── Jenkinsfile                 # CI/CD pipeline definition
-├── 
-├── frontend/                   # Presentation Layer
-│   ├── Dockerfile             # Frontend container config
-│   └── src/                   # Frontend source code
-│       ├── login.php          # Authentication interface
-│       ├── view.php           # Main dashboard with advanced features
-│       ├── add-student.php    # Student creation form
-│       ├── edit.php           # Student editing with photo management
-│       └── images/            # Static assets
-│
-├── backend/                    # Logic Layer
-│   ├── Dockerfile             # Backend container config
-│   └── src/                   # Backend source code
-│       ├── api/               # RESTful API endpoints
-│       │   ├── students.php   # Student CRUD operations
-│       │   ├── auth.php       # Authentication API
-│       │   ├── upload-photo.php # Photo upload handling
-│       │   └── remove-photo.php # Photo removal
-│       ├── create_admin.php   # CLI admin creation tool
-│       ├── db.php             # Database connection
-│       └── cors-helper.php    # CORS management
-│
-├── nginx/                      # Gateway Layer
-│   └── default.conf           # Nginx configuration
-│
-├── init/                       # Database Initialization
-│   └── init.sql               # Database schema
-│
-└── tools/                      # Development Tools
-    ├── docker-compose-tools.yml # SonarQube & Jenkins setup
-    └── .env.tools              # Tools configuration
+```text
+.
+|- docker-compose.yml
+|- Jenkinsfile
+|- nginx/default.conf
+|- init/init.sql
+|- backend/
+|  |- Dockerfile
+|  `- src/
+|     |- api/
+|     |- create_admin.php
+|     |- db.php
+|     `- cors-helper.php
+|- frontend/
+|  |- Dockerfile
+|  `- src/
+`- tools/
+     `- docker-compose-tools.yml
 ```
 
-## 🛠️ Quick Start
+## DevSecOps Controls Implemented
 
-### Prerequisites
-- Docker & Docker Compose
+### Runtime Security
+
+- Security headers at gateway: `X-Frame-Options`, `X-Content-Type-Options`, `X-XSS-Protection`, `Referrer-Policy`
+- Sensitive extension blocking in Nginx (`.env`, `.sql`, `.log`, `.bak`, etc.)
+- API CORS handling in backend with configurable allowed origins
+- Session hardening flags in auth endpoint (`httponly`, strict mode, SameSite)
+- Password hashing with `PASSWORD_ARGON2ID`
+- Prepared statements in auth/data endpoints to reduce SQL injection risk
+
+### CI Security/Quality Gate Foundations
+
+- Jenkins pipeline runs SonarQube analysis on `frontend/src` and `backend/src`
+- Docker images are built in CI and pushed to Docker Hub via credential binding
+- Deployment uses Jenkins file credential to inject runtime `.env` securely
+
+## Prerequisites
+
+- Docker Engine with Docker Compose plugin
 - Git
+- (For CI/CD) Jenkins with:
+    - Docker CLI available to agent
+    - SonarScanner tool configured as `SonarScanner`
+    - SonarQube server configured as `SonarServer`
+    - Credentials IDs:
+        - `dockerhub-credentials-h8815` (username/password)
+        - `3TIER-PHP` (secret file used as `.env`)
 
-### 1. Clone & Setup
-```bash
-git clone <repository-url>
-cd student-management-system
-cp .env.example .env
-```
+## Local Environment Setup
 
-### 2. Configure Environment
-Edit `.env` file with your settings:
+1. Create an `.env` in repository root:
+
 ```env
-# Database Configuration
 DB_USER=student_user
-DB_PASSWORD=secure_password_123
+DB_PASSWORD=change_me
 DB_NAME=student_management
-DB_ROOT_PASSWORD=root_password_123
-
-# Application Configuration
+DB_ROOT_PASSWORD=change_root_me
 API_BASE_URL=http://localhost:3000
-
-# Security Configuration
 ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 ```
 
-### 3. Launch Application
-```bash
-# Start all services
-docker-compose up -d
+2. Start the stack:
 
-# Check service status
-docker-compose ps
+```bash
+docker compose up -d --build
+docker compose ps
 ```
 
-### 4. Create Admin User
+3. Bootstrap admin account:
+
 ```bash
-# Create admin account with strong password requirements
 docker exec -it 3tier-backend php create_admin.php
 ```
 
-**Password Requirements:**
-- Minimum 8 characters
-- At least 1 uppercase letter (A-Z)
-- At least 1 lowercase letter (a-z)
-- At least 1 number (0-9)
-- At least 1 special character (!@#$%^&*()_+-=[]{}|;:,.<>?)
+4. Access app:
 
-### 5. Access Application
-- **Main Application**: http://localhost:3000
-- **Login**: Use the admin credentials you created
+- URL: `http://localhost:3000`
 
-## 🔧 Development Tools
+## Operations Runbook
 
-### Start Development Tools
+### Health and Status
+
 ```bash
-cd tools/
-docker-compose -f docker-compose-tools.yml up -d
+docker compose ps
+docker compose logs --tail=100 nginx backend frontend database
 ```
 
-### Available Tools
-- **SonarQube**: http://localhost:9000 (Code quality analysis)
-- **Jenkins Agent**: Configured for CI/CD pipeline
+### Restart Services
 
-## 🔒 Security Features
-
-### Authentication & Authorization
-- Session-based authentication
-- Strong password enforcement
-- Secure password hashing (ARGON2ID)
-- Session timeout and management
-
-### API Security
-- CORS protection with configurable origins
-- Input validation and sanitization
-- SQL injection prevention (prepared statements)
-- File upload validation and restrictions
-
-### Infrastructure Security
-- Container isolation
-- No direct database access
-- Nginx security headers
-- Environment-based configuration
-
-## 📱 User Interface Features
-
-### Dashboard (view.php)
-- **Student Grid**: Card-based layout with photos
-- **Search & Filter**: Real-time search with status filtering
-- **Bulk Operations**: Multi-select with bulk delete
-- **Pagination**: Efficient data loading
-- **Statistics**: Live counts by status
-- **Responsive Design**: Mobile-optimized layout
-
-### Student Management
-- **Add Student**: Drag-drop photo upload, form validation
-- **Edit Student**: In-place photo management, field validation
-- **Photo Management**: Upload, preview, remove with size limits
-- **Status Management**: Active, Inactive, Graduated states
-
-### User Experience
-- **Toast Notifications**: Success/error feedback with close buttons
-- **Loading States**: Smooth transitions and progress indicators
-- **Dark/Light Mode**: Theme persistence across sessions
-- **Mobile Responsive**: Touch-friendly interface
-
-## 🚀 CI/CD Pipeline
-
-### Jenkins Configuration
-The included `Jenkinsfile` provides:
-- Automated testing
-- Code quality analysis with SonarQube
-- Docker image building
-- Deployment automation
-
-### Pipeline Stages
-1. **Checkout**: Source code retrieval
-2. **Test**: Automated testing suite
-3. **Quality Gate**: SonarQube analysis
-4. **Build**: Docker image creation
-5. **Deploy**: Automated deployment
-
-## 🔧 Configuration
-
-### Environment Variables
-
-#### Database Settings
-```env
-DB_HOST=database
-DB_USER=student_user
-DB_PASSWORD=your_secure_password
-DB_NAME=student_management
-DB_ROOT_PASSWORD=your_root_password
-```
-
-#### Application Settings
-```env
-API_BASE_URL=http://localhost:3000
-ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-```
-
-#### Tools Configuration (tools/.env)
-```env
-JENKINS_URL=http://your-jenkins-server:8080
-JENKINS_AGENT_NAME=your-agent-name
-JENKINS_SECRET=your-jenkins-secret
-SONAR_PORT=9000
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### Application won't start
 ```bash
-# Check service logs
-docker-compose logs
-
-# Restart services
-docker-compose restart
+docker compose restart
 ```
 
-#### Database connection issues
+### Rebuild and Recreate
+
 ```bash
-# Check database health
-docker-compose exec database mysqladmin ping
-
-# Reset database
-docker-compose down -v
-docker-compose up -d
+docker compose down
+docker compose up -d --build --force-recreate
 ```
 
-#### Permission issues
+### Database Reset (Destructive)
+
 ```bash
-# Fix upload directory permissions
-docker-compose exec backend chmod 755 /var/www/html/uploads
+docker compose down -v
+docker compose up -d
 ```
 
-### Service Health Checks
+## CI/CD Pipeline (Jenkinsfile)
+
+The pipeline currently performs:
+
+1. Workspace cleanup
+2. SCM checkout
+3. SonarQube analysis
+4. Docker image build and push (`h8815/student-app-frontend:latest`, `h8815/student-app-backend:latest`)
+5. Deployment with `docker compose up -d --force-recreate`
+6. Basic post-deploy validation (`curl` against API)
+
+## DevSecOps Hardening Backlog (Recommended)
+
+To evolve this into a stronger production baseline, add:
+
+1. SAST dependency scanning (`Trivy`, `Grype`, `OWASP Dependency-Check`) in CI
+2. Container image signing and provenance (`cosign`, attestations)
+3. Non-root containers and read-only filesystems where feasible
+4. Secrets externalization (Vault, cloud secret manager) instead of static env files
+5. TLS termination and secure cookies enabled (`session.cookie_secure=1`) in HTTPS environments
+6. Automated integration tests and security regression tests before deploy
+7. Release tagging strategy (avoid only `latest` tags)
+
+## Tooling: SonarQube (Local)
+
+Start SonarQube from the tools compose:
+
 ```bash
-# Check all services
-docker-compose ps
-
-# View specific service logs
-docker-compose logs frontend
-docker-compose logs backend
-docker-compose logs database
-docker-compose logs nginx
+docker compose -f tools/docker-compose-tools.yml up -d
 ```
 
-## 📊 API Documentation
+- SonarQube UI: `http://localhost:9000`
 
-### Authentication Endpoints
-- `POST /api/auth.php` - Login
-- `GET /api/auth.php` - Check session
-- `DELETE /api/auth.php` - Logout
+## API Endpoints
 
-### Student Management Endpoints
-- `GET /api/students.php` - List students (with pagination/filtering)
-- `GET /api/students.php?id={id}` - Get specific student
-- `POST /api/students.php` - Create student
-- `PUT /api/students.php` - Update student
-- `DELETE /api/students.php` - Delete student
+### Auth
 
-### File Management Endpoints
-- `POST /api/upload-photo.php` - Upload student photo
-- `POST /api/remove-photo.php` - Remove student photo
+- `POST /api/auth.php` (login/register action in payload)
+- `GET /api/auth.php` (session check)
+- `DELETE /api/auth.php` (logout)
 
-## 🤝 Contributing
+### Students
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- `GET /api/students.php`
+- `GET /api/students.php?id=<id>`
+- `POST /api/students.php`
+- `PUT /api/students.php`
+- `DELETE /api/students.php`
 
-## 📄 License
+### File Handling
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+- `POST /api/upload-photo.php`
+- `POST /api/remove-photo.php`
 
-## 🙏 Acknowledgments
+## Troubleshooting
 
-- Bootstrap 5 for the responsive UI framework
-- Docker for containerization
-- MySQL for reliable data storage
-- Nginx for efficient reverse proxy
-- SonarQube for code quality analysis
-- Jenkins for CI/CD automation
+- If containers are healthy but app is unavailable, check gateway routing first:
+    - `docker compose logs nginx`
+- If auth does not persist, verify `backend-sessions` volume is mounted and writable.
+- If API CORS errors occur, confirm `ALLOWED_ORIGINS` in `.env` and restart backend.
+- If DB init fails, inspect MySQL logs and ensure `init/init.sql` was mounted.
 
----
+## License
 
-**Built with ❤️ using modern DevOps practices and 3-tier architecture principles.**
+Use your organization's standard license policy for this repository.

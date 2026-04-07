@@ -111,18 +111,247 @@ if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
         
+        @media (max-width: 1200px) {
+            .nav-brand {
+                font-size: 1.6rem;
+            }
+
+            .page-title {
+                font-size: 2.2rem;
+            }
+        }
+
+        @media (max-width: 992px) {
+            .container {
+                padding: 1.5rem;
+            }
+
+            .page-title {
+                font-size: 2rem;
+            }
+
+            .feature-card {
+                padding: 1.8rem;
+            }
+
+            .nav-brand {
+                font-size: 1.4rem;
+            }
+        }
+        
         @media (max-width: 768px) {
             .container {
                 padding: 1rem;
             }
             
             .page-title {
-                font-size: 2rem;
+                font-size: 1.8rem;
+            }
+
+            .import-export-header {
+                margin-bottom: 1.5rem;
             }
             
             .feature-card {
                 padding: 1.5rem;
-                margin-bottom: 2rem;
+                margin-bottom: 1.5rem;
+            }
+
+            .drop-zone {
+                padding: 2rem 1.5rem;
+            }
+
+            .drop-zone i {
+                font-size: 2rem !important;
+            }
+
+            .btn-primary {
+                padding: 0.6rem 1.2rem;
+                font-size: 0.95rem;
+            }
+
+            .nav-brand {
+                font-size: 1.2rem;
+            }
+
+            .top-nav .d-flex {
+                gap: 8px;
+            }
+
+            .alert {
+                padding: 1rem;
+                font-size: 0.9rem;
+            }
+        }
+
+        @media (max-width: 576px) {
+            .container {
+                padding: 0.75rem;
+            }
+
+            .page-title {
+                font-size: 1.5rem;
+            }
+
+            .import-export-header p {
+                font-size: 0.95rem;
+            }
+            
+            .feature-card {
+                padding: 1.2rem;
+                margin-bottom: 1.2rem;
+            }
+
+            .drop-zone {
+                padding: 1.5rem 1.2rem;
+            }
+
+            .drop-zone i {
+                font-size: 1.5rem !important;
+            }
+
+            .drop-zone h5 {
+                font-size: 1rem;
+                margin-top: 1rem;
+            }
+
+            .drop-zone p {
+                font-size: 0.85rem;
+                margin-bottom: 1rem;
+            }
+
+            .btn-primary {
+                width: 100%;
+                padding: 0.5rem 1rem;
+                font-size: 0.85rem;
+            }
+
+            .nav-brand {
+                font-size: 0.95rem;
+            }
+
+            .top-nav {
+                padding: 10px 0;
+            }
+
+            .d-grid {
+                gap: 0.75rem !important;
+            }
+
+            .btn-lg {
+                padding: 0.5rem 1rem;
+                font-size: 0.85rem;
+            }
+
+            .alert {
+                padding: 0.75rem;
+                font-size: 0.8rem;
+            }
+
+            .feature-card h3 {
+                font-size: 1.2rem;
+            }
+
+            .feature-card p {
+                font-size: 0.85rem;
+            }
+
+            .row.g-4 {
+                gap: 1rem !important;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 0.5rem;
+            }
+
+            .page-title {
+                font-size: 1.3rem;
+            }
+
+            .import-export-header {
+                margin-bottom: 1rem;
+            }
+
+            .import-export-header p {
+                font-size: 0.85rem;
+            }
+            
+            .feature-card {
+                padding: 1rem;
+                margin-bottom: 1rem;
+            }
+
+            .drop-zone {
+                padding: 1.2rem 1rem;
+            }
+
+            .drop-zone i {
+                font-size: 1.2rem !important;
+            }
+
+            .drop-zone h5 {
+                font-size: 0.95rem;
+                margin-top: 0.8rem;
+            }
+
+            .feature-card h3 {
+                font-size: 1.1rem;
+            }
+
+            .feature-card p {
+                font-size: 0.8rem;
+            }
+
+            .btn {
+                padding: 0.4rem 0.8rem;
+                font-size: 0.75rem;
+            }
+
+            .btn-lg {
+                padding: 0.4rem 0.8rem;
+                font-size: 0.75rem;
+            }
+
+            .nav-brand {
+                font-size: 0.85rem;
+            }
+
+            .top-nav {
+                padding: 8px 0;
+            }
+
+            .d-none.d-md-inline {
+                display: none !important;
+            }
+
+            .alert {
+                padding: 0.6rem;
+                font-size: 0.75rem;
+            }
+        }
+
+        @media (max-width: 320px) {
+            .page-title {
+                font-size: 1.1rem;
+            }
+
+            .feature-card {
+                padding: 0.8rem;
+            }
+
+            .drop-zone {
+                padding: 1rem;
+            }
+
+            .btn {
+                padding: 0.3rem 0.5rem;
+                font-size: 0.7rem;
+            }
+
+            .nav-brand {
+                font-size: 0.75rem;
             }
         }
     </style>

@@ -149,7 +149,29 @@ if (isset($_SESSION['authenticated']) && $_SESSION['authenticated'] === true) {
             text-align: center;
         }
 
-        .help-title {
+        .login-link {
+            text-align: center;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 3px dashed #000;
+            font-size: 14px;
+        }
+
+        .login-link a {
+            color: #0066cc;
+            text-decoration: none;
+            font-weight: bold;
+            border-bottom: 2px solid #0066cc;
+            transition: all 0.2s;
+        }
+
+        .login-link a:hover {
+            background: #0066cc;
+            color: white;
+            padding: 2px 5px;
+        }
+
+        .admin-help {
             font-size: 12px;
             color: #666;
             margin-bottom: 10px;
@@ -177,18 +199,113 @@ if (isset($_SESSION['authenticated']) && $_SESSION['authenticated'] === true) {
             font-weight: bold;
         }
 
-        @media (max-width: 500px) {
+        @media (max-width: 1024px) {
             .login-container {
-                padding: 30px 20px;
+                max-width: 90vw;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .login-container {
+                padding: 30px 25px;
                 box-shadow: 8px 8px 0px #000;
+                max-width: 95vw;
             }
 
             h1 {
-                font-size: 24px;
+                font-size: 28px;
             }
 
             .logo {
-                font-size: 36px;
+                font-size: 40px;
+            }
+
+            .form-group {
+                margin-bottom: 20px;
+            }
+
+            input[type="text"],
+            input[type="password"] {
+                padding: 14px;
+                font-size: 16px;
+            }
+
+            .btn-login {
+                padding: 15px;
+                font-size: 16px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 10px;
+            }
+
+            .login-container {
+                padding: 25px 20px;
+                box-shadow: 6px 6px 0px #000;
+                max-width: 100vw;
+            }
+
+            h1 {
+                font-size: 22px;
+            }
+
+            .logo {
+                font-size: 32px;
+                margin-bottom: 8px;
+            }
+
+            .subtitle {
+                font-size: 12px;
+            }
+
+            .logo-section {
+                margin-bottom: 20px;
+            }
+
+            .form-group {
+                margin-bottom: 15px;
+            }
+
+            label {
+                font-size: 13px;
+                margin-bottom: 6px;
+            }
+
+            input[type="text"],
+            input[type="password"] {
+                padding: 12px;
+                font-size: 16px;
+                border-width: 2px;
+            }
+
+            .btn-login {
+                padding: 14px;
+                font-size: 14px;
+                border-width: 3px;
+            }
+
+            .login-link {
+                margin-top: 15px;
+                padding-top: 15px;
+                font-size: 12px;
+            }
+        }
+
+        @media (max-width: 320px) {
+            .login-container {
+                padding: 20px 15px;
+                box-shadow: 4px 4px 0px #000;
+            }
+
+            h1 {
+                font-size: 20px;
+            }
+
+            .btn-login {
+                padding: 12px;
+                font-size: 13px;
             }
         }
     </style>
@@ -234,6 +351,10 @@ if (isset($_SESSION['authenticated']) && $_SESSION['authenticated'] === true) {
                 LOGIN
             </button>
         </form>
+
+        <div class="login-link">
+            Don't have an account? <a href="register.php">REGISTER HERE</a>
+        </div>
 
         <!-- <div class="admin-help">
             <p class="help-title">ℹ️ Need an admin account?</p>

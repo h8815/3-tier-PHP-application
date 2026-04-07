@@ -136,21 +136,184 @@ if (!$id) {
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
         
+        @media (max-width: 1200px) {
+            .nav-brand {
+                font-size: 1.5rem;
+            }
+
+            .edit-title {
+                font-size: 2.2rem;
+            }
+        }
+
+        @media (max-width: 992px) {
+            .container {
+                padding: 1.5rem;
+            }
+
+            .form-card {
+                padding: 2rem;
+            }
+
+            .nav-brand {
+                font-size: 1.3rem;
+            }
+
+            .edit-title {
+                font-size: 2rem;
+            }
+        }
+        
         @media (max-width: 768px) {
             .container {
                 padding: 1rem;
             }
             
             .edit-title {
-                font-size: 2rem;
+                font-size: 1.8rem;
+            }
+
+            .edit-header {
+                margin-bottom: 1.5rem;
             }
             
             .form-card {
                 padding: 1.5rem;
+                border-radius: 15px;
+            }
+
+            .info-card {
+                padding: 1.2rem;
+                margin-bottom: 1.5rem;
+            }
+
+            .form-control, .form-select {
+                padding: 0.75rem;
+                font-size: 14px;
             }
             
             .nav-brand {
-                font-size: 1.2rem;
+                font-size: 1.1rem;
+            }
+
+            .top-nav .d-flex {
+                flex-direction: column;
+                gap: 8px;
+            }
+        }
+
+        @media (max-width: 576px) {
+            .container {
+                padding: 0.75rem;
+            }
+
+            .edit-title {
+                font-size: 1.5rem;
+            }
+
+            .edit-header {
+                margin-bottom: 1.2rem;
+            }
+            
+            .form-card {
+                padding: 1.2rem;
+                border-radius: 12px;
+            }
+
+            .form-control, .form-select {
+                padding: 0.6rem;
+                font-size: 13px;
+                border-radius: 8px;
+            }
+
+            .btn {
+                padding: 0.5rem 0.8rem;
+                font-size: 0.85rem;
+                width: 100%;
+                margin-bottom: 8px;
+            }
+            
+            .nav-brand {
+                font-size: 0.95rem;
+            }
+
+            .top-nav {
+                padding: 10px 0;
+            }
+
+            .top-nav .btn {
+                padding: 0.4rem 0.6rem;
+                font-size: 0.8rem;
+            }
+
+            #loading-state {
+                padding: 2rem 0;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 0.5rem;
+            }
+
+            .edit-title {
+                font-size: 1.3rem;
+            }
+
+            .edit-header {
+                margin-bottom: 1rem;
+                text-align: center;
+            }
+            
+            .form-card {
+                padding: 1rem;
+            }
+
+            .form-control, .form-select {
+                padding: 0.5rem;
+                font-size: 12px;
+            }
+
+            .btn {
+                padding: 0.4rem 0.6rem;
+                font-size: 0.75rem;
+                width: 100%;
+            }
+
+            .nav-brand {
+                font-size: 0.85rem;
+            }
+
+            .top-nav {
+                padding: 8px 0;
+            }
+
+            .d-none.d-md-inline {
+                display: none !important;
+            }
+        }
+
+        @media (max-width: 320px) {
+            .edit-title {
+                font-size: 1.1rem;
+            }
+
+            .form-card {
+                padding: 0.8rem;
+            }
+
+            .form-control, .form-select {
+                padding: 0.4rem;
+                font-size: 11px;
+            }
+
+            .btn {
+                padding: 0.3rem 0.5rem;
+                font-size: 0.7rem;
+            }
+
+            .nav-brand {
+                font-size: 0.8rem;
             }
         }
         
